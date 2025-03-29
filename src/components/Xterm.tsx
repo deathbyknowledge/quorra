@@ -1,51 +1,9 @@
 import React, { useEffect, useRef } from "react";
 import { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
-import { AppContext, useAppContext } from "../context/AppContext";
+import { useAppContext } from "../context/AppContext";
+import { commands } from "../system/commands";
 
-type CommandFn = (args: string[], ctx: AppContext) => void | Promise<void>;
-
-const commands: { [key: string]: CommandFn } = {
-  clear: (_, { term }) => {
-    if (!term) return;
-    term.write("", () => term.clear());
-  },
-  whoami: (_, { term }) => {
-    if (!term) return;
-    term.writeln("sam"); // Move cursor to start of line
-  },
-  ls: async (args, { agent, term }) => {
-    if (!term || !agent) return;
-
-    const res = await agent.call<FSEntry[]>("ls", [args]);
-    let str = "";
-    res.forEach((entry: FSEntry) => {
-      const slugs = entry.path.split("/");
-      const name =
-        entry.path.split("/")[slugs.length - (entry.type === "file" ? 1 : 2)];
-      str += (entry.type === "file" ? name : `\x1b[1m${name}\x1b[0m`) + "\t";
-    });
-    term.writeln(str);
-  },
-  cat: async (args, { agent, term }) => {
-    if (!term || !agent) return;
-    // convert to abs path
-    await agent.call("cat", [args], {
-      onChunk: (chunk: any) => {
-        const arr = Uint8Array.from(Object.values(chunk));
-        term.write(arr);
-      },
-      onDone: () => term.writeln(""),
-    });
-  },
-};
-
-export type FSEntry = {
-  type: "file" | "dir";
-  path: string;
-  size?: number;
-  ts?: Date;
-};
 const XtermComponent: React.FC = () => {
   const terminalRef = useRef(null);
   const termRef = useRef<any>(null); // To store terminal instance
@@ -67,46 +25,19 @@ const XtermComponent: React.FC = () => {
     // Attach terminal to the ref div
     if (terminalRef.current) {
       term.open(terminalRef.current);
+      term.focus();
 
       // Fit terminal to container size
       fitAddon.fit();
 
-      // Initial content
-      term.write("$ ");
-
       // Handle user input
-      term.onData(async (data) => {
-        if (data === "\r") {
-          // Enter key
-          const [cmd, ...args] = inputBuffer.current.trim().split(" ");
-          if (cmd in commands) {
-            term.writeln("");
-            await commands[cmd](args, ctx);
-            inputBuffer.current = "";
-            term.write("$ "); // Move cursor to start of line
-          } else {
-            term.write("\n$ ");
-            inputBuffer.current = ""; // Reset buffer
-          }
-        } else if (data === "\b" || data.charCodeAt(0) === 127) {
-          // Backspace
-          if (inputBuffer.current.length > 0) {
-            inputBuffer.current = inputBuffer.current.slice(0, -1); // Remove last char
-            term.write("\b \b"); // Move cursor back, overwrite with space, move back again
-          }
-        } else {
-          // Regular character
-          inputBuffer.current += data;
-          term.write(data);
-        }
-      });
-
       // Handle window resize
       const handleResize = () => {
         fitAddon.fit();
       };
 
       window.addEventListener("resize", handleResize);
+      (terminalRef.current as any).focus();
 
       // Cleanup
       return () => {
@@ -115,6 +46,37 @@ const XtermComponent: React.FC = () => {
       };
     }
   }, [term]);
+
+  useEffect(() => {
+    if (!term) return;
+
+    // if (disposable) disposable.dispose();
+    const lis = term.onData(async (data) => {
+      if (data === "\r") {
+        // Enter key
+        const [cmd, ...args] = inputBuffer.current.trim().split(" ");
+        term.writeln("");
+        if (cmd in commands) {
+          await commands[cmd](args, ctx);
+          inputBuffer.current = "";
+        } else {
+          inputBuffer.current = ""; // Reset buffer
+        }
+        term.write(ctx.prompt.current);
+      } else if (data === "\b" || data.charCodeAt(0) === 127) {
+        // Backspace
+        if (inputBuffer.current.length > 0) {
+          inputBuffer.current = inputBuffer.current.slice(0, -1); // Remove last char
+          term.write("\b \b"); // Move cursor back, overwrite with space, move back again
+        }
+      } else {
+        // Regular character
+        inputBuffer.current += data;
+        term.write(data);
+      }
+    });
+    return () => lis.dispose();
+  }, [term, ctx.agentState?.cwd]);
 
   return (
     <div

@@ -10,10 +10,18 @@ type State = {
 };
 
 export class Quorra extends Agent<Env, State> {
-
+  onStart(): void | Promise<void> {
+    if (!this.state) {
+      // set initial state
+      this.setState({ cwd: "/" });
+    }
+  }
   // syscalls
   async listDir(path: string): Promise<FSEntry[]> {
-    const list = await this.env.FILE_SYSTEM.list({ prefix: path, delimiter: "/" });
+    const list = await this.env.FILE_SYSTEM.list({
+      prefix: path,
+      delimiter: "/",
+    });
 
     const entries: FSEntry[] = [
       ...list.objects.map((obj) => ({
@@ -46,36 +54,54 @@ export class Quorra extends Agent<Env, State> {
     return entry;
   }
 
+  toAbsolutePath(path: string) {
+    return path.startsWith("/") ? path : this.state.cwd + path;
+  }
+
   // RPC
-  @callable({ description: "test rpc" })
+  @callable()
   async ls(args: string[]) {
-    return await this.listDir(args.length === 0 ? "/" : args[0]);
+    let dirPath =
+      args.length > 0 ? this.toAbsolutePath(args[0]) : this.state.cwd;
+    return await this.listDir(dirPath);
+  }
+
+  @callable()
+  async cd(args: string[]) {
+    if (args.length != 1) return;
+
+    let newCwd = this.toAbsolutePath(args[0]);
+    if (!newCwd.endsWith("/")) newCwd += "/";
+    console.log(newCwd);
+    const dir = await this.listDir(newCwd);
+    if (dir.length > 0) {
+      // it exists
+      this.setState({ ...this.state, cwd: newCwd });
+      return newCwd;
+    }
   }
 
   @callable({ streaming: true })
   async cat(stream: StreamingResponse, args: string[]) {
-    if (args.length === 0) {
-      return Response.json({ error: "No file selected." }, { status: 400 });
-    } else {
-      const entry = await this.getFile("/" + args[0]);
-      if (!entry) {
-        return Response.json({ error: "Not found." }, { status: 404 });
-      }
-      const reader = entry.content!.getReader();
+    if (args.length === 0) return;
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            stream.end();
-            break;
-          } else {
-            stream.send(value); // Process each chunk here
-          }
+    const entry = await this.getFile(this.toAbsolutePath(args[0]));
+    if (!entry) return;
+
+    const reader = entry.content!.getReader();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          stream.end();
+          break;
+        } else {
+          stream.send(value); // Process each chunk here
         }
-      } finally {
-        reader.releaseLock();
       }
+    } finally {
+      reader.releaseLock();
     }
   }
 }
