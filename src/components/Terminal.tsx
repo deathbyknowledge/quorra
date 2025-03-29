@@ -4,7 +4,7 @@ import LoadingBorderWrapper from "./LoadingBorderWrapper";
 import XtermComponent from "./Xterm";
 
 const Terminal: React.FC = () => {
-  const {  loading, setLoading } =
+  const {  animationLoading, setAnimationLoading } =
     useAppContext();
 
   return (
@@ -12,10 +12,10 @@ const Terminal: React.FC = () => {
       borderColor="var(--color-line)"
       animationSpeed={1}
       onFinish={() => {
-        setLoading(false);
+        setAnimationLoading(false);
       }}
     >
-      {!loading && <XtermComponent />}
+      {!animationLoading && <XtermComponent />}
     </LoadingBorderWrapper>
   );
 };

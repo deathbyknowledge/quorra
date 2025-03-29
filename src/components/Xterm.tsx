@@ -1,67 +1,42 @@
 import React, { useEffect, useRef } from "react";
-import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
-import { useAppContext } from "../context/AppContext";
+import { AppContext, useAppContext } from "../context/AppContext";
 
-type CommandFn = (
-  term: Terminal,
-  inputBuffer: React.MutableRefObject<string>,
-  agent: any
-) => void | Promise<void>;
-
-const writeMultiline = (term: Terminal, content: string) => {
-  content.split("\n").forEach((line) => term.writeln(line));
-};
+type CommandFn = (args: string[], ctx: AppContext) => void | Promise<void>;
 
 const commands: { [key: string]: CommandFn } = {
-  clear: (term, inputBuffer) => {
+  clear: (_, { term }) => {
+    if (!term) return;
     term.write("", () => term.clear());
-    inputBuffer.current = "";
   },
-  whoami: (term, inputBuffer) => {
+  whoami: (_, { term }) => {
+    if (!term) return;
     term.writeln("sam"); // Move cursor to start of line
-    inputBuffer.current = "";
   },
+  ls: async (args, { agent, term }) => {
+    if (!term || !agent) return;
 
-  ls: async (term, inputBuffer, _agent) => {
-    const res = await (
-      await fetch("/api/quorra", {
-        method: "POST",
-        body: JSON.stringify({ type: "cmd", data: inputBuffer.current }),
-        headers: {
-          "content-type": "application/json",
-        },
-      })
-    ).json();
+    const res = await agent.call<FSEntry[]>("ls", [args]);
     let str = "";
     res.forEach((entry: FSEntry) => {
-      const name = entry.path.split("/")[1];
+      const slugs = entry.path.split("/");
+      const name =
+        entry.path.split("/")[slugs.length - (entry.type === "file" ? 1 : 2)];
       str += (entry.type === "file" ? name : `\x1b[1m${name}\x1b[0m`) + "\t";
     });
     term.writeln(str);
-    inputBuffer.current = "";
   },
-  cat: async (term, inputBuffer, _agent) => {
-    const res = await await fetch("/api/quorra", {
-      method: "POST",
-      body: JSON.stringify({ type: "cmd", data: inputBuffer.current }),
-      headers: {
-        "content-type": "application/json",
+  cat: async (args, { agent, term }) => {
+    if (!term || !agent) return;
+    // convert to abs path
+    await agent.call("cat", [args], {
+      onChunk: (chunk: any) => {
+        const arr = Uint8Array.from(Object.values(chunk));
+        term.write(arr);
       },
+      onDone: () => term.writeln(""),
     });
-    try {
-      if (res.ok) {
-        const contentStr = await res.text();
-        writeMultiline(term, contentStr);
-      } else {
-        const { error } = await res.json();
-        term.writeln(error);
-      }
-    } catch (e) {
-      term.writeln("Binary blob file.");
-    }
-    inputBuffer.current = "";
   },
 };
 
@@ -75,19 +50,12 @@ const XtermComponent: React.FC = () => {
   const terminalRef = useRef(null);
   const termRef = useRef<any>(null); // To store terminal instance
   const inputBuffer = useRef(""); // Store current line input
-  const { agent } = useAppContext();
+  const ctx = useAppContext();
+  const term = ctx.term;
 
   useEffect(() => {
     // Initialize xterm terminal
-    const term = new Terminal({
-      cursorBlink: true,
-      theme: {
-        background: "rgba(0, 0, 0, 0)", // Transparent background
-        foreground: "#9baaa0",
-        cursor: "#9baaa0",
-      },
-      // Remove fixed rows/cols to allow dynamic sizing
-    });
+    if (!term) return;
 
     // Store terminal instance in ref
     termRef.current = term;
@@ -110,13 +78,14 @@ const XtermComponent: React.FC = () => {
       term.onData(async (data) => {
         if (data === "\r") {
           // Enter key
-          const [cmd] = inputBuffer.current.split(" ");
+          const [cmd, ...args] = inputBuffer.current.trim().split(" ");
           if (cmd in commands) {
             term.writeln("");
-            await commands[cmd](term, inputBuffer, agent);
+            await commands[cmd](args, ctx);
+            inputBuffer.current = "";
             term.write("$ "); // Move cursor to start of line
           } else {
-            term.write("\r\n$ ");
+            term.write("\n$ ");
             inputBuffer.current = ""; // Reset buffer
           }
         } else if (data === "\b" || data.charCodeAt(0) === 127) {
@@ -145,7 +114,7 @@ const XtermComponent: React.FC = () => {
         term.dispose();
       };
     }
-  }, []);
+  }, [term]);
 
   return (
     <div

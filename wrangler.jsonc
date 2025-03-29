@@ -4,9 +4,10 @@
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "clu",
+  "name": "quorra",
   "main": "api/index.ts",
   "compatibility_date": "2025-03-20",
+  "compatibility_flags": [ "nodejs_compat" ],
   "assets": {
     "not_found_handling": "single-page-application",
     "binding": "ASSETS"

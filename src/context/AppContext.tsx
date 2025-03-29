@@ -2,32 +2,34 @@ import React, {
   createContext,
   PropsWithChildren,
   useContext,
+  useMemo,
   useState,
 } from "react";
 import { useAgent } from "agents/react";
+import { Terminal } from "xterm";
 
-type AppContext = {
-  loading: boolean;
+export type AppContext = {
+  animationLoading: boolean;
+  setAnimationLoading: any;
   agent?: ReturnType<typeof useAgent<AgentState>>;
   agentState?: AgentState;
   messages: Message[];
   setMessages: any;
-  setLoading: any;
+  term?: Terminal,
 };
 
 const AppContext = createContext<AppContext>({
-  loading: true,
-  agent: undefined,
+  animationLoading: true,
+  setAnimationLoading: () => {},
   messages: [],
   setMessages: () => {},
-  setLoading: () => {},
 });
 
 type AgentState = {
   history: string[];
   env: Map<string, string>;
-  HELP_MESSAGE: string,
-  status: 'ready' | 'thinking' | 'fetching'
+  HELP_MESSAGE: string;
+  status: "ready" | "thinking" | "fetching";
 };
 
 interface Message {
@@ -36,15 +38,29 @@ interface Message {
 }
 
 export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
-  const [loading, setLoading] = useState(true);
+  const [animationLoading, setAnimationLoading] = useState(true);
   const [agentState, _setAgentState] = useState<AgentState | undefined>();
   const [messages, setMessages] = useState<Message[]>([]);
+  const term = useMemo(
+    () =>
+      new Terminal({
+        cursorBlink: true,
+        convertEol: true,
+        theme: {
+          background: "rgba(0, 0, 0, 0)", // Transparent background
+          foreground: "#9baaa0",
+          cursor: "#9baaa0",
+        },
+      }),
+    []
+  );
 
   const agent = useAgent({
     agent: "quorra",
     prefix: "api",
     onOpen: () => {
       //setMessages([{ role: "assistant", content: WELCOME_MESSAGE }]);
+      agent.call("", [], {});
     },
     onStateUpdate: _setAgentState,
     onMessage: (message) => {
@@ -73,10 +89,17 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
     },
   });
 
-  
   return (
     <AppContext.Provider
-      value={{ agent, loading, agentState, messages, setMessages, setLoading }}
+      value={{
+        agent,
+        animationLoading,
+        agentState,
+        messages,
+        setMessages,
+        setAnimationLoading,
+        term,
+      }}
     >
       {children}
     </AppContext.Provider>

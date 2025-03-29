@@ -1,41 +1,19 @@
-import { Agent, getAgentByName } from "agents";
+import {
+  Agent,
+  getAgentByName,
+  unstable_callable as callable,
+  StreamingResponse,
+} from "agents";
 
 type State = {
   cwd: string;
 };
 
 export class Quorra extends Agent<Env, State> {
-  async onStart() {
-    console.log("a");
-    await this.env.FILE_SYSTEM.put("/test.txt", "Hello from the grid!\n:)");
-    await this.env.FILE_SYSTEM.put("/folder/test.txt", "Hello agane!");
-  }
-  async onRequest(request: Request): Promise<Response> {
-    try {
-      const { type, data } = await request.json<{ type: string; data: any }>();
-      switch (type) {
-        case "cmd":
-          const [cmd, ...args] = (data as string).split(" ");
-          const cmdAsMethod = `q_${cmd}` as keyof Quorra; // q_[cmd name] to avoid clashes
-          if (cmdAsMethod in this && typeof this[cmdAsMethod] === "function") { // pleasing ts
-            const method = this[cmdAsMethod] as (args: string[]) => Promise<Response>;
-            return method.call(this, args);
-          }
-          break;
-        case "kill":
-      }
-    } catch (error) {
-      console.error(error);
-    }
-    return new Response("not found", { status: 404 });
-  }
 
-  // File System
+  // syscalls
   async listDir(path: string): Promise<FSEntry[]> {
-    const list = await this.env.FILE_SYSTEM.list({
-      prefix: path,
-      delimiter: "/",
-    });
+    const list = await this.env.FILE_SYSTEM.list({ prefix: path, delimiter: "/" });
 
     const entries: FSEntry[] = [
       ...list.objects.map((obj) => ({
@@ -68,13 +46,14 @@ export class Quorra extends Agent<Env, State> {
     return entry;
   }
 
-  // Commands
-  async q_ls(args: string[]): Promise<Response> {
-    const dirEntries = await this.listDir(args.length === 0 ? "/" : args[0]);
-    return Response.json(dirEntries);
+  // RPC
+  @callable({ description: "test rpc" })
+  async ls(args: string[]) {
+    return await this.listDir(args.length === 0 ? "/" : args[0]);
   }
 
-  async q_cat(args: string[]): Promise<Response> {
+  @callable({ streaming: true })
+  async cat(stream: StreamingResponse, args: string[]) {
     if (args.length === 0) {
       return Response.json({ error: "No file selected." }, { status: 400 });
     } else {
@@ -82,7 +61,21 @@ export class Quorra extends Agent<Env, State> {
       if (!entry) {
         return Response.json({ error: "Not found." }, { status: 404 });
       }
-      return new Response(entry.content);
+      const reader = entry.content!.getReader();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            stream.end();
+            break;
+          } else {
+            stream.send(value); // Process each chunk here
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
     }
   }
 }
