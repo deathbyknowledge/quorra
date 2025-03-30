@@ -3,20 +3,30 @@ import {
   getAgentByName,
   unstable_callable as callable,
   StreamingResponse,
-} from "agents";
+} from "agents-v2";
 
 type State = {
   cwd: string;
 };
 
+enum Owner {
+  System = "system",
+  User = "user",
+  Quorra = "quorra",
+}
+
 const openFileDescriptors = new Map<string, WritableStream>();
 
 export class Quorra extends Agent<Env, State> {
-  onStart(): void | Promise<void> {
+  async onStart(): Promise<void> {
     if (!this.state) {
       // set initial state
       this.setState({ cwd: "/" });
     }
+  }
+
+  async runs() {
+    console.log("running task...");
   }
   // syscalls
   async listDir(path: string): Promise<FSEntry[]> {
@@ -31,6 +41,7 @@ export class Quorra extends Agent<Env, State> {
         path: obj.key,
         size: obj.size,
         ts: obj.uploaded,
+        owner: (obj.customMetadata?.owner as Owner) ?? Owner.User,
       })),
 
       ...list.delimitedPrefixes.map((pref) => ({
@@ -57,12 +68,14 @@ export class Quorra extends Agent<Env, State> {
   }
 
   @callable()
-  open(path: string, size: number) {
+  open(path: string, size: number, owner = "user") {
     // get file desc
     const { readable, writable } = new FixedLengthStream(size);
     const absPath = this.toAbsolutePath(path);
     openFileDescriptors.set(absPath, writable);
-    const uploadPromise = this.env.FILE_SYSTEM.put(absPath, readable);
+    const uploadPromise = this.env.FILE_SYSTEM.put(absPath, readable, {
+      customMetadata: { owner },
+    });
     this.ctx.waitUntil(
       (async () => {
         try {
@@ -158,6 +171,34 @@ export class Quorra extends Agent<Env, State> {
 
     return entry;
   }
+
+  @callable()
+  async scheduleTest(description?: string) {
+    const task = await this.schedule("*/1 * * * *", "runs", { description });
+    return task.id;
+  }
+
+  @callable()
+  ps(description?: string) {
+    return this.getSchedules({ description });
+  }
+
+  @callable()
+  async kill(taskId: string) {
+    if (!taskId) return;
+    return await this.cancelSchedule(taskId);
+  }
+
+  @callable()
+  reboot() {
+    this.ctx.waitUntil(
+      (async () => {
+        this.ctx.getWebSockets().forEach((ws) => ws.close());
+        await this.destroy();
+      })()
+    );
+    return true;
+  }
 }
 
 export type FSEntry = {
@@ -166,6 +207,7 @@ export type FSEntry = {
   size?: number;
   ts?: Date;
   content?: ReadableStream;
+  owner?: Owner;
 };
 
 export default {
@@ -176,7 +218,6 @@ export default {
       const b64Key = readCookieValue(request, "auth");
       if (!b64Key) return new Response("missing auth", { status: 400 });
       const key = atob(b64Key);
-      console.log(key, env.SECRET_KEY);
       if (key != env.SECRET_KEY) return new Response("gtfo", { status: 401 });
 
       const namedAgent = getAgentByName<Env, Quorra>(env.Quorra, "quorra");

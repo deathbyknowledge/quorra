@@ -13,7 +13,8 @@
 	},
 	"dependencies": {
 		"@types/wicg-file-system-access": "^2023.10.5",
-		"agents": "0.0.46",
+		"agents": "^0.0.46",
+		"agents-v2": "file:~/agents/packages/agents/",
 		"jmespath": "^0.16.0",
 		"miniflare": "^4.20250321.1",
 		"node": "^18.20.8",

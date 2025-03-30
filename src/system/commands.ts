@@ -119,10 +119,7 @@ export const commands: { [key: string]: CommandFn } = {
           let offset = 0;
           while (true) {
             if (value.byteLength - offset > chunkSize) {
-              const chunk = value.slice(
-                offset,
-                offset + chunkSize
-              );
+              const chunk = value.slice(offset, offset + chunkSize);
               await agent.call<FSEntry>("writeFile", [path, chunk]);
               total += chunkSize;
               offset += chunkSize;
@@ -138,5 +135,26 @@ export const commands: { [key: string]: CommandFn } = {
     } catch (e) {
       term.writeln(`uload error: ${e}`);
     }
+  },
+  reboot: async (_, { agent }) => {
+    await agent?.call("reboot", []);
+    location.reload();
+  },
+  spawn: async (_, { agent, term }) => {
+    const taskId = await agent?.call("scheduleTest", []);
+    term?.writeln(`Spawned ${taskId}.`);
+  },
+  ps: async (args, { agent, term }) => {
+    const tasks = await agent?.call("ps", [args.at(0)]);
+    term?.writeln(JSON.stringify(tasks, null, 2));
+  },
+  kill: async (args, { agent, term }) => {
+    if (!term || !agent) return;
+    if (args.length != 1) {
+      term.writeln("Usage: kill [procId]");
+      return;
+    }
+    const success = await agent.call("kill", [args[0]]);
+    term?.writeln(success ? "Done." : "Could not kill process.");
   },
 };
