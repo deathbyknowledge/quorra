@@ -9,6 +9,8 @@ type State = {
   cwd: string;
 };
 
+const openFileDescriptors = new Map<string, WritableStream>();
+
 export class Quorra extends Agent<Env, State> {
   onStart(): void | Promise<void> {
     if (!this.state) {
@@ -39,19 +41,61 @@ export class Quorra extends Agent<Env, State> {
     return entries.sort();
   }
 
-  async getFile(path: string): Promise<FSEntry | null> {
-    const obj = await this.env.FILE_SYSTEM.get(path);
+  async getFile(path: string, headOnly = false): Promise<FSEntry | null> {
+    const obj = await this.env.FILE_SYSTEM[headOnly ? "head" : "get"](path);
     if (!obj) {
       return null;
     }
     const entry: FSEntry = {
       path: obj.key,
-      content: obj.body, // this is a RedableStream
       type: "file",
       size: obj.size,
       ts: obj.uploaded,
     };
+    if (!headOnly) entry.content = (obj as any).body; // this is a RedableStream
     return entry;
+  }
+
+  @callable()
+  open(path: string, size: number) {
+    // get file desc
+    const { readable, writable } = new FixedLengthStream(size);
+    const absPath = this.toAbsolutePath(path);
+    openFileDescriptors.set(absPath, writable);
+    const uploadPromise = this.env.FILE_SYSTEM.put(absPath, readable);
+    this.ctx.waitUntil(
+      (async () => {
+        try {
+          await uploadPromise;
+        } catch (e) {
+          console.error(e);
+        }
+      })()
+    );
+  }
+
+  @callable()
+  async close(path: string) {
+    // get file desc
+    const absPath = this.toAbsolutePath(path);
+    const stream = openFileDescriptors.get(absPath);
+    console.log(stream);
+    if (!stream) return;
+    await stream.close();
+    console.log("closed");
+    openFileDescriptors.delete(absPath);
+  }
+
+  @callable()
+  async writeFile(path: string, data: any) {
+    const absPath = this.toAbsolutePath(path);
+    const writer = openFileDescriptors.get(absPath)?.getWriter();
+    if (!writer) return null;
+    console.log(data);
+
+    console.log(Uint8Array.from(Object.values(data)).length)
+    await writer.write(Uint8Array.from(Object.values(data)));
+    writer.releaseLock();
   }
 
   toAbsolutePath(path: string) {
@@ -97,12 +141,22 @@ export class Quorra extends Agent<Env, State> {
           stream.end();
           break;
         } else {
-          stream.send(value); // Process each chunk here
+          stream.send(value);
         }
       }
     } finally {
       reader.releaseLock();
     }
+  }
+
+  @callable()
+  async file(args: string[]) {
+    if (args.length === 0) return;
+
+    const entry = await this.getFile(this.toAbsolutePath(args[0]), true);
+    if (!entry) return;
+
+    return entry;
   }
 }
 
