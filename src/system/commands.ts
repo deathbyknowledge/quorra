@@ -83,7 +83,6 @@ export const commands: { [key: string]: CommandFn } = {
           const arr = Uint8Array.from(Object.values(chunk));
           await writableStream.write(arr);
         },
-        onDone: () => term.writeln(""),
         onError: () => term.writeln(""),
       });
       await writableStream.close();
@@ -109,22 +108,17 @@ export const commands: { [key: string]: CommandFn } = {
       const freader = fstream.getReader();
       await agent.call<FSEntry>("open", [path, file.size]);
       let total = 0;
-      console.log("opened", file.size);
       while (true) {
         const { done, value } = await freader.read();
         if (done) {
-          console.log("done", total);
           await agent.call<FSEntry>("close", [path]);
           break;
         }
-        console.log("value len", value?.length);
         if (value) {
           const chunkSize = 1024 * 16; // 16KB
           let offset = 0;
           while (true) {
-            console.log("len", value.length, offset, chunkSize);
             if (value.byteLength - offset > chunkSize) {
-              console.log("chunk");
               const chunk = value.slice(
                 offset,
                 offset + chunkSize

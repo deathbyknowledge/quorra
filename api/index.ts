@@ -93,7 +93,7 @@ export class Quorra extends Agent<Env, State> {
     if (!writer) return null;
     console.log(data);
 
-    console.log(Uint8Array.from(Object.values(data)).length)
+    console.log(Uint8Array.from(Object.values(data)).length);
     await writer.write(Uint8Array.from(Object.values(data)));
     writer.releaseLock();
   }
@@ -167,11 +167,18 @@ export type FSEntry = {
   ts?: Date;
   content?: ReadableStream;
 };
+
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
+      const b64Key = readCookieValue(request, "auth");
+      if (!b64Key) return new Response("missing auth", { status: 400 });
+      const key = atob(b64Key);
+      console.log(key, env.SECRET_KEY);
+      if (key != env.SECRET_KEY) return new Response("gtfo", { status: 401 });
+
       const namedAgent = getAgentByName<Env, Quorra>(env.Quorra, "quorra");
       const namedResp = (await namedAgent).fetch(request);
       return namedResp;
@@ -180,3 +187,15 @@ export default {
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;
+
+const readCookieValue = (req: Request, key: string) => {
+  const cookie = req.headers
+    .get("cookie")
+    ?.split(" ")
+    .find((val) => val.startsWith(key));
+  if (!cookie) return;
+
+  let value = cookie.split("=")[1];
+  if (value.endsWith(";")) value = value.slice(0, -1);
+  return value;
+};
