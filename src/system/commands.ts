@@ -144,8 +144,8 @@ export const commands: { [key: string]: CommandFn } = {
     const taskId = await agent?.call("scheduleTest", []);
     term?.writeln(`Spawned ${taskId}.`);
   },
-  ps: async (args, { agent, term }) => {
-    const tasks = await agent?.call("ps", [args.at(0)]);
+  ps: async (_, { agent, term }) => {
+    const tasks = await agent?.call("ps", []);
     term?.writeln(JSON.stringify(tasks, null, 2));
   },
   kill: async (args, { agent, term }) => {
@@ -157,4 +157,12 @@ export const commands: { [key: string]: CommandFn } = {
     const success = await agent.call("kill", [args[0]]);
     term?.writeln(success ? "Done." : "Could not kill process.");
   },
+  rm: async (args, { agent, term }) => {
+    if (!term || !agent) return;
+    if (args.length != 1) {
+      term.writeln("Usage: rm [path/to/file]");
+      return;
+    }
+    await agent.call("rm", [args[0]]);
+  }
 };

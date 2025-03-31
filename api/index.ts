@@ -3,7 +3,8 @@ import {
   getAgentByName,
   unstable_callable as callable,
   StreamingResponse,
-} from "agents-v2";
+} from "agents";
+import { runWithTools } from "@cloudflare/ai-utils";
 
 type State = {
   cwd: string;
@@ -15,20 +16,84 @@ enum Owner {
   Quorra = "quorra",
 }
 
+const INITIAL_STATE: State = { cwd: "/" };
+
 const openFileDescriptors = new Map<string, WritableStream>();
 
 export class Quorra extends Agent<Env, State> {
   async onStart(): Promise<void> {
     if (!this.state) {
       // set initial state
-      this.setState({ cwd: "/" });
+      this.setState(INITIAL_STATE);
     }
+  }
+
+  onError(connection: unknown, error?: unknown): void | Promise<void> {
+    console.error(`[ERROR] Conn ${connection}: ${error}`);
   }
 
   async runs() {
     console.log("running task...");
+    const writeToDisk = async (args: { path: string; content: string }) => {
+      try {
+        const { path, content } = args;
+        await this.env.FILE_SYSTEM.put(path, content, {
+          customMetadata: { owner: Owner.Quorra },
+        });
+        return "Successfully wrote to disk.";
+      } catch (e) {
+        return "Failed to write to disk.";
+      }
+    };
+
+    const obj = await this.env.FILE_SYSTEM.get("/sam/status.txt");
+    const content = await obj?.text();
+    await runWithTools(
+      this.env.AI as any,
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      {
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are Quorra, the first ISO (Isomorphic Algorithm). You live in Sam's system for now. You have access to a few tools to interact with the system.",
+          },
+          {
+            role: "user",
+            content: `Output from file /sam/status.txt:
+${content}
+`,
+          },
+        ],
+        tools: [
+          {
+            name: "writeToDisk",
+            description:
+              "Write the [content] text to disk in the specified [path].",
+            parameters: {
+              type: "object",
+              properties: {
+                path: {
+                  type: "string",
+                  description: "Absolute path of the file to write",
+                },
+                content: {
+                  type: "string",
+                  description: "Content of the file.",
+                },
+              },
+              required: ["path", "content"],
+            },
+            // reference to previously defined function
+            function: writeToDisk,
+          },
+        ],
+      },
+      { maxRecursiveToolRuns: 1 }
+    );
+    console.log("finished running task.");
   }
-  // syscalls
+
   async listDir(path: string): Promise<FSEntry[]> {
     const list = await this.env.FILE_SYSTEM.list({
       prefix: path,
@@ -82,6 +147,8 @@ export class Quorra extends Agent<Env, State> {
           await uploadPromise;
         } catch (e) {
           console.error(e);
+        } finally {
+          openFileDescriptors.delete(path);
         }
       })()
     );
@@ -92,10 +159,8 @@ export class Quorra extends Agent<Env, State> {
     // get file desc
     const absPath = this.toAbsolutePath(path);
     const stream = openFileDescriptors.get(absPath);
-    console.log(stream);
     if (!stream) return;
     await stream.close();
-    console.log("closed");
     openFileDescriptors.delete(absPath);
   }
 
@@ -104,22 +169,21 @@ export class Quorra extends Agent<Env, State> {
     const absPath = this.toAbsolutePath(path);
     const writer = openFileDescriptors.get(absPath)?.getWriter();
     if (!writer) return null;
-    console.log(data);
 
-    console.log(Uint8Array.from(Object.values(data)).length);
     await writer.write(Uint8Array.from(Object.values(data)));
     writer.releaseLock();
   }
 
-  toAbsolutePath(path: string) {
-    return path.startsWith("/") ? path : this.state.cwd + path;
+  toAbsolutePath(path: string, dir = false) {
+    path =  path.startsWith("/") ? path : this.state.cwd + path;
+    if (dir && !path.endsWith("/")) path += "/";
+    return path;
   }
 
-  // RPC
   @callable()
   async ls(args: string[]) {
     let dirPath =
-      args.length > 0 ? this.toAbsolutePath(args[0]) : this.state.cwd;
+      this.toAbsolutePath(args.at(0) ?? '', true)
     return await this.listDir(dirPath);
   }
 
@@ -127,7 +191,7 @@ export class Quorra extends Agent<Env, State> {
   async cd(args: string[]) {
     if (args.length != 1) return;
 
-    let newCwd = this.toAbsolutePath(args[0]);
+    let newCwd = this.toAbsolutePath(args[0], true);
     if (!newCwd.endsWith("/")) newCwd += "/";
     console.log(newCwd);
     const dir = await this.listDir(newCwd);
@@ -173,14 +237,14 @@ export class Quorra extends Agent<Env, State> {
   }
 
   @callable()
-  async scheduleTest(description?: string) {
-    const task = await this.schedule("*/1 * * * *", "runs", { description });
+  async scheduleTest() {
+    const task = await this.schedule("*/30 * * * *", "runs");
     return task.id;
   }
 
   @callable()
-  ps(description?: string) {
-    return this.getSchedules({ description });
+  ps() {
+    return this.getSchedules();
   }
 
   @callable()
@@ -190,14 +254,17 @@ export class Quorra extends Agent<Env, State> {
   }
 
   @callable()
-  reboot() {
-    this.ctx.waitUntil(
-      (async () => {
-        this.ctx.getWebSockets().forEach((ws) => ws.close());
-        await this.destroy();
-      })()
-    );
+  async reboot() {
+    // TODO: revisit
+    this.setState(INITIAL_STATE);
+    await this.destroy();
     return true;
+  }
+
+  @callable()
+  async rm(path: string) {
+    path = this.toAbsolutePath(path);
+    await this.env.FILE_SYSTEM.delete(path);
   }
 }
 
