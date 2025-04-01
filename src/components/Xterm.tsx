@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
-import { FitAddon } from "xterm-addon-fit";
-import "xterm/css/xterm.css";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 import { useAppContext } from "../context/AppContext";
 import { commands } from "../system/commands";
 

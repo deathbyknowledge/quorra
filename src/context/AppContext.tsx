@@ -8,7 +8,7 @@ import React, {
   useState,
 } from "react";
 import { useAgent } from "agents/react";
-import { Terminal } from "xterm";
+import { Terminal } from "@xterm/xterm";
 import { formatPrompt } from "../system/constants";
 
 export type AppContext = {
