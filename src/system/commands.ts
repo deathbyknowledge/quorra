@@ -1,3 +1,4 @@
+import { Terminal } from "@xterm/xterm";
 import { AppContext } from "../context/AppContext";
 import { formatPrompt } from "./constants";
 
@@ -8,6 +9,22 @@ export type FSEntry = {
   path: string;
   size?: number;
   ts?: Date;
+};
+
+export const authCommands: {
+  [key: string]: (
+    args: string[],
+    term: Terminal,
+    setKey: (key: string) => void
+  ) => void;
+} = {
+  login: (args, term, setKey) => {
+    if (args.length !== 1) {
+      term.writeln("Usage: login [password]")
+      return;
+    }
+    setKey(args[0]);
+  },
 };
 
 export const commands: { [key: string]: CommandFn } = {
@@ -164,5 +181,5 @@ export const commands: { [key: string]: CommandFn } = {
       return;
     }
     await agent.call("rm", [args[0]]);
-  }
+  },
 };

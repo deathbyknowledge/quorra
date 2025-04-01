@@ -2,13 +2,15 @@ import React, { useEffect, useRef } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { useAppContext } from "../context/AppContext";
-import { commands } from "../system/commands";
+import { commands, authCommands } from "../system/commands";
+import { useAuthContext } from "../context/AuthContext";
 
 const XtermComponent: React.FC = () => {
   const terminalRef = useRef(null);
   const termRef = useRef<any>(null); // To store terminal instance
   const inputBuffer = useRef(""); // Store current line input
   const ctx = useAppContext();
+  const { key, setKey } = useAuthContext();
   const term = ctx.term;
 
   useEffect(() => {
@@ -56,12 +58,14 @@ const XtermComponent: React.FC = () => {
         // Enter key
         const [cmd, ...args] = inputBuffer.current.trim().split(" ");
         term.writeln("");
-        if (cmd in commands) {
-          await commands[cmd](args, ctx);
-          inputBuffer.current = "";
+        if (!ctx.established || !key) {
+          // not authenticated
+          if (cmd in authCommands) authCommands[cmd](args, term, setKey as any);
         } else {
-          inputBuffer.current = ""; // Reset buffer
+          // std commands when authenticated
+          if (cmd in commands) await commands[cmd](args, ctx);
         }
+        inputBuffer.current = "";
         term.write(ctx.prompt.current);
       } else if (data === "\b" || data.charCodeAt(0) === 127) {
         // Backspace

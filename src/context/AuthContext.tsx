@@ -7,31 +7,33 @@ import React, {
 } from "react";
 
 type AuthContext = {
-  CF_TOKEN?: string;
-  setToken?: (token: string) => void;
+  key?: string;
+  setKey?: (token: string) => void;
 };
 
 const AuthContext = createContext<AuthContext>({});
 
+// very simple auth context
 export const AuthContextProvider: React.FC<PropsWithChildren> = ({
   children,
 }) => {
-  const [cfToken, setCfToken] = useState("");
+  const [key, setKey]  = useState<string | undefined>();
 
   useEffect(() => {
-    const token = localStorage.getItem("auth");
-    if (token) {
-      document.cookie = "X-Auth=" + token + "; path=/";
-      setCfToken(token);
+    const authKey = localStorage.getItem("auth");
+    if (authKey) {
+      document.cookie = "auth=" + btoa(authKey) + "; path=/";
+      setKey(authKey);
     }
   }, []);
 
-  const setToken = (token: string) => {
-    localStorage.setItem("auth", token);
+  const setKeyInStg = (key: string) => {
+    localStorage.setItem("auth", key);
+    location.reload();
   };
 
   return (
-    <AuthContext.Provider value={{ CF_TOKEN: cfToken, setToken }}>
+    <AuthContext.Provider value={{ key: key, setKey: setKeyInStg }}>
       {children}
     </AuthContext.Provider>
   );

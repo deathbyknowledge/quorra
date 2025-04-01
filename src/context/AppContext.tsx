@@ -3,6 +3,7 @@ import React, {
   MutableRefObject,
   PropsWithChildren,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -10,14 +11,14 @@ import React, {
 import { useAgent } from "agents/react";
 import { Terminal } from "@xterm/xterm";
 import { formatPrompt } from "../system/constants";
+import { useAuthContext } from "./AuthContext";
 
 export type AppContext = {
   animationLoading: boolean;
   setAnimationLoading: any;
   agent?: ReturnType<typeof useAgent<AgentState>>;
   agentState?: AgentState;
-  messages: Message[];
-  setMessages: any;
+  established: boolean;
   term?: Terminal;
   prompt: MutableRefObject<string>;
 };
@@ -25,8 +26,7 @@ export type AppContext = {
 const AppContext = createContext<AppContext>({
   animationLoading: true,
   setAnimationLoading: () => {},
-  messages: [],
-  setMessages: () => {},
+  established: false,
   prompt: {} as MutableRefObject<string>,
 });
 
@@ -34,20 +34,14 @@ export type AgentState = {
   cwd: string;
 };
 
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
-
 export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const [animationLoading, setAnimationLoading] = useState(true);
   const [agentState, _setAgentState] = useState<AgentState | undefined>();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const prompt = useRef("/$ ");
+  const [established, setEstablished] = useState(false);
+  const { key } = useAuthContext();
+  const prompt = useRef("$ ");
   const term = useMemo(() => {
     // First msg just empty prompt
-    if (!agentState) return;
-
     const _term = new Terminal({
       cursorBlink: true,
       convertEol: true,
@@ -57,41 +51,34 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
         cursor: "#9baaa0",
       },
     });
-    prompt.current = formatPrompt(agentState.cwd);
+    _term.writeln("Booting up...");
     _term.write(prompt.current);
 
     return _term;
-  }, [typeof agentState === "undefined"]);
+  }, []);
+
+  useEffect(() => {
+    if (term && !key)  term.writeln("Authorization required. ");
+  }, [term, typeof key === undefined]);
 
   const agent = useAgent({
     agent: "quorra",
     prefix: "api",
-    onOpen: () => {},
-    onStateUpdate: _setAgentState,
-    onMessage: (message) => {
-      try {
-        const { type, data } = JSON.parse(message.data);
-        if (type === "cli") {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content:
-                typeof data === "string" ? data : JSON.stringify(data, null, 2),
-            },
-          ]);
-        }
-      } catch (error) {
-        console.error("Error processing WebSocket message:", error);
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: "Error: Could not process server response.",
-          },
-        ]);
-      }
+    onOpen: () => {
+      setEstablished(true);
     },
+    onStateUpdate: (_state) => {
+      const state = _state as AgentState;
+      _setAgentState((prev) => {
+        if (typeof prev === "undefined") { // first state update since page load
+          term.writeln("");
+          term.write(formatPrompt(state.cwd), () => term.clear());
+        }
+        return state as AgentState;
+      });
+      prompt.current = formatPrompt(state.cwd);
+    },
+    onClose: () => setEstablished(false),
   });
 
   return (
@@ -99,9 +86,8 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
       value={{
         agent,
         animationLoading,
+        established,
         agentState,
-        messages,
-        setMessages,
         setAnimationLoading,
         term,
         prompt,

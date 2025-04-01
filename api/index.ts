@@ -175,15 +175,14 @@ ${content}
   }
 
   toAbsolutePath(path: string, dir = false) {
-    path =  path.startsWith("/") ? path : this.state.cwd + path;
+    path = path.startsWith("/") ? path : this.state.cwd + path;
     if (dir && !path.endsWith("/")) path += "/";
     return path;
   }
 
   @callable()
   async ls(args: string[]) {
-    let dirPath =
-      this.toAbsolutePath(args.at(0) ?? '', true)
+    let dirPath = this.toAbsolutePath(args.at(0) ?? "", true);
     return await this.listDir(dirPath);
   }
 
@@ -280,6 +279,15 @@ export type FSEntry = {
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/verify") {
+      const b64Key = readCookieValue(request, "auth");
+      if (!b64Key) return Response.json({ valid: false }, { status: 401 });
+      const key = atob(b64Key);
+      if (key != env.SECRET_KEY)
+        return Response.json({ valid: false }, { status: 401 });
+      return Response.json({ valid: true }, { status: 200 });
+    }
 
     if (url.pathname.startsWith("/api/")) {
       const b64Key = readCookieValue(request, "auth");
