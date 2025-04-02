@@ -20,7 +20,7 @@ export const authCommands: {
 } = {
   login: (args, term, setKey) => {
     if (args.length !== 1) {
-      term.writeln("Usage: login [password]")
+      term.writeln("Usage: login [password]");
       return;
     }
     setKey(args[0]);
@@ -181,5 +181,23 @@ export const commands: { [key: string]: CommandFn } = {
       return;
     }
     await agent.call("rm", [args[0]]);
+  },
+  ask: async (args, { agent, term }) => {
+    if (!term || !agent) return;
+    if (args.length === 0) {
+      term.writeln("Usage: ask [your ask]");
+      return;
+    }
+    const res = await agent.call("ask", [args.join(" "), false]);
+    term.writeln(res as string)
+  },
+  think: async (args, { agent, term }) => {
+    if (!term || !agent) return;
+    if (args.length === 0) {
+      term.writeln("Usage: think [your thoughts]");
+      return;
+    }
+    const res = await agent.call("ask", [args.join(" "), true]);
+    term.writeln(res as string)
   },
 };
