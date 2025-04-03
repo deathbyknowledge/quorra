@@ -17,11 +17,15 @@
 		"@xterm/addon-fit": "^0.10.0",
 		"@xterm/xterm": "^5.5.0",
 		"agents": "^0.0.46",
+		"array-back": "^6.2.2",
+		"find-replace": "^5.0.2",
 		"jmespath": "^0.16.0",
 		"miniflare": "^4.20250321.1",
 		"node": "^18.20.8",
+		"openai": "^4.91.1",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1",
+		"typical": "^7.3.0",
 		"uuid": "^11.1.0"
 	},
 	"devDependencies": {
@@ -40,6 +44,6 @@
 		"typescript": "~5.6.2",
 		"typescript-eslint": "^8.18.2",
 		"vite": "^6.2.3",
-		"wrangler": "^4.5.1"
+		"wrangler": "^4.7.0"
 	}
 }

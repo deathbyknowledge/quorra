@@ -16,7 +16,7 @@ const App: React.FC = () => {
         <div
           style={{
             width: "70%",
-            height: "70%",
+            height: "90%",
             display: "flex",
             marginRight: "auto",
             marginLeft: "auto",
