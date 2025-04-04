@@ -43,9 +43,15 @@ export class Quorra extends Agent<Env, State> {
   }
 
   @callable()
-  async ask(ask: string, stream = false) {
-    console.log({ ask, stream });
-    const model = Model.GPT4o;
+  async ask({
+    ask,
+    model,
+    stream = false,
+  }: {
+    ask: string;
+    model: Model;
+    stream: boolean;
+  }) {
     const openai = new OpenAI(getProviderConfig(model));
     const messages = [
       {
@@ -65,7 +71,7 @@ export class Quorra extends Agent<Env, State> {
           {
             type: "function",
             function: {
-              name: "listDir",
+              name: "readdir",
               description:
                 "Lists file system entries in the specified directory path. Returns JSON array of entries, either files or directories with their paths.",
               parameters: {
@@ -130,7 +136,6 @@ export class Quorra extends Agent<Env, State> {
   }
 
   async runs() {
-    console.log("running task...");
     const writeToDisk = async (args: { path: string; content: string }) => {
       try {
         const { path, content } = args;

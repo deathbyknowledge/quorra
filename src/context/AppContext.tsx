@@ -52,13 +52,13 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
       },
     });
     _term.writeln("Booting up...");
-    _term.write(prompt.current);
 
     return _term;
   }, []);
 
   useEffect(() => {
-    if (term && !key)  term.writeln("Authorization required. ");
+    if (term && !key)
+      term.write(`Authorization required.\n${prompt.current}`);
   }, [term, typeof key === undefined]);
 
   const agent = useAgent({
@@ -70,9 +70,9 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
     onStateUpdate: (_state) => {
       const state = _state as AgentState;
       _setAgentState((prev) => {
-        if (typeof prev === "undefined") { // first state update since page load
-          term.writeln("");
-          term.write(formatPrompt(state.cwd), () => term.clear());
+        if (typeof prev === "undefined") {
+          // first state update since page load
+          term.write(`\n${formatPrompt(state.cwd)}`, () => term.clear());
         }
         return state as AgentState;
       });

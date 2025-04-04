@@ -19,7 +19,6 @@
 		"agents": "^0.0.46",
 		"array-back": "^6.2.2",
 		"find-replace": "^5.0.2",
-		"jmespath": "^0.16.0",
 		"miniflare": "^4.20250321.1",
 		"node": "^18.20.8",
 		"openai": "^4.91.1",
