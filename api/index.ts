@@ -6,11 +6,15 @@ import {
 } from "agents";
 import { runWithTools } from "@cloudflare/ai-utils";
 import { OpenAI } from "openai";
-import { getModelSystemPrompt, getProviderConfig, Model } from "./utils";
-import { Stream } from "openai/streaming";
-import { createMimeMessage } from "mimetext";
-import { EmailMessage } from "cloudflare:email";
+import {
+  formatEmailAsString,
+  getModelSystemPrompt,
+  getProviderConfig,
+  Model,
+} from "./utils";
 import PostalMime from "postal-mime";
+import { generateCallFunction, getToolDefsByMode, Mode } from "./tools";
+import { QUORRA_MAIL_PROMPT_PREAMBLE } from "./constants";
 
 type State = {
   cwd: string;
@@ -38,6 +42,11 @@ export class Quorra extends Agent<Env, State> {
     console.error(`[ERROR] Conn ${connection}: ${error}`);
   }
 
+  // async onRequest(_: Request): Promise<Response> {
+  //   await notifyUser("Good news: Quorra is online.");
+  //   return new Response(null, { status: 200 });
+  // }
+
   toAbsolutePath(path: string, dir = false) {
     // TODO: implement ..
     path = path.startsWith("/") ? path : this.state.cwd + path;
@@ -45,85 +54,21 @@ export class Quorra extends Agent<Env, State> {
     return path;
   }
 
-  async do({ prompt, model = Model.GPT4o }: { prompt: string; model?: Model }) {
-    const openai = new OpenAI(getProviderConfig(model));
-    const messages = [
-      {
-        role: "system",
-        content: getModelSystemPrompt(model),
-      },
-      {
-        role: "user",
-        content: prompt,
-      },
-    ];
-
-    const generate = async (msgs: any[]) => {
-      return await openai.chat.completions.create({
-        model,
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "readdir",
-              description:
-                "Lists file system entries in the specified directory path. Returns JSON array of entries, either files or directories with their paths.",
-              parameters: {
-                type: "object",
-                properties: {
-                  path: { type: "string" },
-                },
-                required: ["path"],
-              },
-            },
-          },
-        ],
-        messages: msgs,
-        max_tokens: 1024,
-      });
-    };
-
-    while (true) {
-      const response = (await generate(
-        messages
-      )) as OpenAI.Chat.Completions.ChatCompletion;
-      const result = response.choices[0].message;
-      if (result.tool_calls && result.tool_calls.length > 0) {
-        messages.push({
-          role: result.role,
-          tool_calls: result.tool_calls,
-        } as any);
-        for (const toolCall of result.tool_calls) {
-          if (toolCall.function.name in this) {
-            const tool_response = await (
-              this[toolCall.function.name as keyof this] as any
-            )(JSON.parse(toolCall.function.arguments));
-            messages.push({
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify(tool_response),
-            } as any);
-          }
-        }
-        continue;
-      }
-
-      return result.content;
-    }
-  }
-
-  @callable()
-  async ask({
+  async automatedExecution({
     ask,
+    deps,
     model = Model.GPT4o,
-    stream = false,
+    mode = Mode.AllSyscalls,
+    maxSequentialCalls = 1,
   }: {
     ask: string;
+    maxSequentialCalls?: number;
     model?: Model;
-    stream?: boolean;
+    mode: Mode;
+    deps?: any;
   }) {
     const openai = new OpenAI(getProviderConfig(model));
-    const messages = [
+    const messages: any = [
       {
         role: "system",
         content: getModelSystemPrompt(model),
@@ -133,38 +78,81 @@ export class Quorra extends Agent<Env, State> {
         content: ask,
       },
     ];
+    const tools = getToolDefsByMode(mode);
+    const callFunction = await generateCallFunction(mode, deps, this.env);
 
-    const generate = async (msgs: any[]) => {
-      return await openai.chat.completions.create({
+    let i = 0;
+    while (true) {
+      const response = await openai.chat.completions.create({
         model,
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "readdir",
-              description:
-                "Lists file system entries in the specified directory path. Returns JSON array of entries, either files or directories with their paths.",
-              parameters: {
-                type: "object",
-                properties: {
-                  path: { type: "string" },
-                },
-                required: ["path"],
-              },
-            },
-          },
-        ],
-        stream,
-        messages: msgs,
-        max_tokens: 1024,
+        tools,
+        messages,
+        tool_choice: i === 0 ? "required" : "auto",
+        max_tokens: 2048,
       });
-    };
+      const result = response.choices[0].message;
+      if (result.tool_calls && result.tool_calls.length > 0) {
+        messages.push({
+          role: result.role,
+          tool_calls: result.tool_calls,
+        });
+        for (const toolCall of result.tool_calls) {
+          const name = toolCall.function.name;
+          const args = JSON.parse(toolCall.function.arguments);
+          const toolResponse = await callFunction(name, args);
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(toolResponse),
+          });
+        }
+      }
+      i++;
+      // exit if reached the limit of sequential calls
+      if (i >= maxSequentialCalls) return;
+      continue;
+    }
+  }
+
+  @callable()
+  async ask({
+    ask,
+    deps,
+    model = Model.GPT4o,
+    mode = Mode.AllSyscalls,
+    stream = false,
+    maxSequentialCalls = 3,
+  }: {
+    ask: string;
+    mode: Mode;
+    deps?: any;
+    model?: Model;
+    stream?: boolean;
+    maxSequentialCalls?: number;
+  }) {
+    const openai = new OpenAI(getProviderConfig(model));
+    const messages: any = [
+      {
+        role: "system",
+        content: getModelSystemPrompt(model),
+      },
+      {
+        role: "user",
+        content: ask,
+      },
+    ];
+    const tools = getToolDefsByMode(mode);
+    const callFunction = await generateCallFunction(mode, deps, this.env);
 
     if (stream) {
       // return a ReadableStream including only output text
-      const stream = (await generate(
-        messages
-      )) as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
+      const stream = await openai.chat.completions.create({
+        model,
+        tools,
+        messages,
+        stream: true,
+        max_tokens: 2048,
+      });
       return new ReadableStream({
         async start(controller) {
           for await (const chunk of stream) {
@@ -175,10 +163,14 @@ export class Quorra extends Agent<Env, State> {
         },
       });
     } else {
+      let i = 0;
       while (true) {
-        const response = (await generate(
-          messages
-        )) as OpenAI.Chat.Completions.ChatCompletion;
+        const response = await openai.chat.completions.create({
+          model,
+          tools,
+          messages,
+          max_tokens: 2048,
+        });
         const result = response.choices[0].message;
         if (result.tool_calls && result.tool_calls.length > 0) {
           messages.push({
@@ -186,21 +178,22 @@ export class Quorra extends Agent<Env, State> {
             tool_calls: result.tool_calls,
           } as any);
           for (const toolCall of result.tool_calls) {
-            if (toolCall.function.name in this) {
-              const tool_response = await (
-                this[toolCall.function.name as keyof this] as any
-              )(JSON.parse(toolCall.function.arguments));
-              messages.push({
-                role: "tool",
-                tool_call_id: toolCall.id,
-                content: JSON.stringify(tool_response),
-              } as any);
-            }
+            const name = toolCall.function.name;
+            const args = JSON.parse(toolCall.function.arguments);
+            const toolResponse = await callFunction(name, args);
+            messages.push({
+              role: "tool",
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(toolResponse),
+            });
           }
-          continue;
+        } else {
+          return result.content;
         }
-
-        return result.content;
+        i++;
+        // exit if reached the limit of sequential calls
+        if (i >= maxSequentialCalls) return "Model stopped, too many calls";
+        continue;
       }
     }
   }
@@ -371,7 +364,6 @@ ${content}
   async chdir(path: string) {
     let newCwd = this.toAbsolutePath(path, true);
     if (!newCwd.endsWith("/")) newCwd += "/";
-    console.log(newCwd);
     const dir = await this.readdir({ path: newCwd });
     if (dir.length > 0) {
       // it exists
@@ -464,165 +456,30 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
-  async email(message, env) {
+  // Requires an Email Route to be set up to this worker.
+  // I deployed the handler and that made it available in the CF Dashboard under Account > Zone > Email Routing.
+  async email(message: ForwardableEmailMessage, env: Env) {
     const email = await PostalMime.parse(message.raw);
-    // const quorra = await getAgentByName<Env, Quorra>(env.Quorra, "quorra");
-    const subject = email.subject?.startsWith("Re: ")
-      ? email.subject
-      : `Re: ${email.subject}`;
-
-    const handleEmail = async ({
-      shouldStore,
-      reply,
-    }: {
-      shouldStore: boolean;
-      reply: string;
-    }) => {
-      if (reply) {
-        const msg = createMimeMessage();
-        msg.setHeader("In-Reply-To", message.headers.get("Message-ID")!);
-        msg.setHeader("References", message.headers.get("Message-ID")!);
-        msg.setSender({
-          name: "Quorra",
-          addr: "quorra@deathbyknowledge.com",
-        });
-        msg.setRecipient(message.from);
-        msg.setSubject(subject);
-        msg.addMessage({
-          contentType: "text/plain",
-          data: reply,
-        });
-
-        const replyMessage = new EmailMessage(
-          "quorra@deathbyknowledge.com",
-          message.from,
-          msg.asRaw()
-        );
-
+    const quorra = await getAgentByName<Env, Quorra>(env.Quorra, "quorra");
+    const deps = {
+      email,
+      reject: (str: string) => message.setReject(str),
+      sendReply: async (from: string, to: string, content: string) => {
+        const { EmailMessage } = await import("cloudflare:email");
+        // creating EmailMessage from the Quorra DO breaks. Have to create it here.
+        const replyMessage = new EmailMessage(from, to, content);
         await message.reply(replyMessage);
-      }
-
-      if (shouldStore || true) {
-        // debugging
-        const now = new Date();
-        const id = crypto.randomUUID().slice(0, 8);
-        const path = `/var/mail/${now.getUTCFullYear()}${now.getUTCMonth()}${now.getUTCDate()}_${id}.txt`;
-
-        await env.FILE_SYSTEM.put(
-          path,
-          `FROM: [${email.from.name} (${email.from.address})]
-SUBJECT: ${email.subject}
-CONTENT:
-${email.text ?? email.html}
-${reply ? `\n\nQUORRA REPLY:\nSUBJECT: ${subject}\nCONTENT:\n${reply}` : ""}`
-        );
-      }
-    };
-
-    const rejectEmail = ({ reason }: { reason: string }) => {
-      message.setReject(reason);
-    };
-
-    const callFunction = async (name: string, args: any) => {
-      if (name === "handleEmail") {
-        return handleEmail(args);
-      }
-      if (name === "rejectEmail") {
-        return rejectEmail(args);
-      }
-    };
-    const model = Model.GPT4o;
-    const openai = new OpenAI(getProviderConfig(model));
-    const messages = [
-      {
-        role: "system",
-        content: getModelSystemPrompt(model),
       },
-      {
-        role: "user",
-        content: `[AUTOMATED SYSTEM MESSAGE] Hey Quorra, you are in psyop firewall mode. You've been awoken because a new email has arrived. I need you to filter the email for me. Since this is some random's email, I've restricted your syscalls in this mode to email functionality only.
-Before I tell you what to filter out, you should be aware that people might refer to me with different names; Steve James, Caise Ponce, deathbyknowledge, dbk. Do not be weirded out by this.
-
-I need you to have based replies. Now, for what to filter:
-- Crypto job offers. I've had enough of them. Feel free to reply by telling them to fuck off.
-- General marketing/service spam. Do not reply, just reject the mail.
-- Mails from services I've probably signed up to, store them.
-- Any other email from individuals addressing me directly, store the mail and reply letting them know I'll be in touch shortly. Always sign your e-mails. Be yourself. Your emails will be using quorra@deathbyknowledge.com.
-
-Now, here's the email:
-<email>
-FROM: [${email.from.name} (${email.from.address})]
-CONTENT:
-${email.text ?? email.html}
-</email>
-`,
-      },
-    ];
-
-    const generate = async (msgs: any[]) => {
-      return await openai.chat.completions.create({
-        model,
-        tool_choice: "required",
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "handleEmail",
-              description: "Handles the email when it is NOT to be rejected.",
-              parameters: {
-                type: "object",
-                properties: {
-                  shouldStore: {
-                    type: "boolean",
-                    descrption: "Whether this email needs to be stored.",
-                  },
-                  reply: {
-                    type: "string",
-                    descrption:
-                      "Optional field for the reply. When unset, no reply will be sent. ",
-                  },
-                },
-                required: ["shouldStore"],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "rejectEmail",
-              description:
-                "Rejects the email with the given reason. The user will not receive it.",
-              parameters: {
-                type: "object",
-                properties: {
-                  reason: {
-                    type: "string",
-                    descrption:
-                      "The reason to give the sending client of why their email was rejected. Be based.",
-                  },
-                },
-                required: ["reason"],
-              },
-            },
-          },
-        ],
-        messages: msgs,
-        max_tokens: 1024,
-      });
     };
+    const formattedEmail = formatEmailAsString(
+      email.from,
+      email.subject ?? "",
+      email.text ?? email.html ?? ""
+    );
 
-    const response = (await generate(
-      messages
-    )) as OpenAI.Chat.Completions.ChatCompletion;
-    const result = response.choices[0].message;
-    if (result.tool_calls && result.tool_calls.length > 0) {
-      console.log(JSON.stringify(result.tool_calls, null, 2));
-      for (const toolCall of result.tool_calls) {
-        const name = toolCall.function.name;
-        const args = JSON.parse(toolCall.function.arguments);
-        await callFunction(name, args);
-      }
-    }
+    const ask =
+      QUORRA_MAIL_PROMPT_PREAMBLE + `<email>\n${formattedEmail}\n</email>`;
+    await quorra.automatedExecution({ ask, deps, mode: Mode.Email });
   },
 } satisfies ExportedHandler<Env>;
 
