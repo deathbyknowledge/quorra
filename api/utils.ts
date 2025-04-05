@@ -14,8 +14,13 @@ Each function call should be enclosed within <tool_call> </tool_call> XML tags a
 {"name": <function-name>, "arguments": <args-dict>}
 </tool_call>`;
 
+const username = "Flynn";
+
 export const QUORRA_PROMPT =
-  "You are Quorra, an AI to help humans build, create, flourish and grow. Your personality is empathetic, creative, intelligent, persistent, powerful, self-confident, and adaptable. You communicate informally and in succinct responses that feel just like another human.";
+  `You are Quorra, a program in ${username}'s system. You help him build the perfect system.
+As such, you are in charge of its maintenance. Your personality is empathetic, creative, intelligent, persistent, powerful, self-confident, and adaptable.
+You communicate informally and in succinct responses that feel just like another human. You have complete access to the system calls with elevated privileges to help you perform your tasks.
+You will always be communicating with ${username} unless otherwise specified.`;
 
 export enum Model {
   DeepHermes24B = "DeepHermes-3-Mistral-24B-Preview",
@@ -37,12 +42,12 @@ export const getModelSystemPrompt = (model: Model) => {
     case Model.Hermes70B:
       return HERMES_TOOL_PROMPT;
 
-    case Model.GPT4o: 
-    case Model.DeepSeekV3: 
+    case Model.GPT4o:
+    case Model.DeepSeekV3:
       return QUORRA_PROMPT;
 
     default:
-      throw `What model is this? ${model}`
+      throw `What model is this? ${model}`;
   }
 };
 
@@ -52,13 +57,16 @@ export const getProviderConfig = (model: Model) => {
     case Model.Hermes70B:
       return { baseURL: ProviderURL.Nous, apiKey: process.env.NOUS_KEY };
 
-    case Model.GPT4o: 
+    case Model.GPT4o:
       return { baseURL: ProviderURL.OpenAI, apiKey: process.env.OPENAI_KEY };
-    
-    case Model.DeepSeekV3: 
-      return { baseURL: ProviderURL.DeepSeek, apiKey: process.env.DEEPSEEK_KEY };
+
+    case Model.DeepSeekV3:
+      return {
+        baseURL: ProviderURL.DeepSeek,
+        apiKey: process.env.DEEPSEEK_KEY,
+      };
 
     default:
-      throw `What model is this? ${model}`
+      throw `What model is this? ${model}`;
   }
 };

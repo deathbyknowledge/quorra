@@ -8,6 +8,9 @@ import { runWithTools } from "@cloudflare/ai-utils";
 import { OpenAI } from "openai";
 import { getModelSystemPrompt, getProviderConfig, Model } from "./utils";
 import { Stream } from "openai/streaming";
+import { createMimeMessage } from "mimetext";
+import { EmailMessage } from "cloudflare:email";
+import PostalMime from "postal-mime";
 
 type State = {
   cwd: string;
@@ -42,15 +45,82 @@ export class Quorra extends Agent<Env, State> {
     return path;
   }
 
+  async do({ prompt, model = Model.GPT4o }: { prompt: string; model?: Model }) {
+    const openai = new OpenAI(getProviderConfig(model));
+    const messages = [
+      {
+        role: "system",
+        content: getModelSystemPrompt(model),
+      },
+      {
+        role: "user",
+        content: prompt,
+      },
+    ];
+
+    const generate = async (msgs: any[]) => {
+      return await openai.chat.completions.create({
+        model,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "readdir",
+              description:
+                "Lists file system entries in the specified directory path. Returns JSON array of entries, either files or directories with their paths.",
+              parameters: {
+                type: "object",
+                properties: {
+                  path: { type: "string" },
+                },
+                required: ["path"],
+              },
+            },
+          },
+        ],
+        messages: msgs,
+        max_tokens: 1024,
+      });
+    };
+
+    while (true) {
+      const response = (await generate(
+        messages
+      )) as OpenAI.Chat.Completions.ChatCompletion;
+      const result = response.choices[0].message;
+      if (result.tool_calls && result.tool_calls.length > 0) {
+        messages.push({
+          role: result.role,
+          tool_calls: result.tool_calls,
+        } as any);
+        for (const toolCall of result.tool_calls) {
+          if (toolCall.function.name in this) {
+            const tool_response = await (
+              this[toolCall.function.name as keyof this] as any
+            )(JSON.parse(toolCall.function.arguments));
+            messages.push({
+              role: "tool",
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(tool_response),
+            } as any);
+          }
+        }
+        continue;
+      }
+
+      return result.content;
+    }
+  }
+
   @callable()
   async ask({
     ask,
-    model,
+    model = Model.GPT4o,
     stream = false,
   }: {
     ask: string;
-    model: Model;
-    stream: boolean;
+    model?: Model;
+    stream?: boolean;
   }) {
     const openai = new OpenAI(getProviderConfig(model));
     const messages = [
@@ -334,7 +404,7 @@ ${content}
   }
 
   @callable()
-  async scheduleTest() {
+  async spawn() {
     const task = await this.schedule("*/30 * * * *", "runs");
     return task.id;
   }
@@ -392,6 +462,167 @@ export default {
     }
 
     return env.ASSETS.fetch(request);
+  },
+
+  async email(message, env) {
+    const email = await PostalMime.parse(message.raw);
+    // const quorra = await getAgentByName<Env, Quorra>(env.Quorra, "quorra");
+    const subject = email.subject?.startsWith("Re: ")
+      ? email.subject
+      : `Re: ${email.subject}`;
+
+    const handleEmail = async ({
+      shouldStore,
+      reply,
+    }: {
+      shouldStore: boolean;
+      reply: string;
+    }) => {
+      if (reply) {
+        const msg = createMimeMessage();
+        msg.setHeader("In-Reply-To", message.headers.get("Message-ID")!);
+        msg.setHeader("References", message.headers.get("Message-ID")!);
+        msg.setSender({
+          name: "Quorra",
+          addr: "quorra@deathbyknowledge.com",
+        });
+        msg.setRecipient(message.from);
+        msg.setSubject(subject);
+        msg.addMessage({
+          contentType: "text/plain",
+          data: reply,
+        });
+
+        const replyMessage = new EmailMessage(
+          "quorra@deathbyknowledge.com",
+          message.from,
+          msg.asRaw()
+        );
+
+        await message.reply(replyMessage);
+      }
+
+      if (shouldStore || true) {
+        // debugging
+        const now = new Date();
+        const id = crypto.randomUUID().slice(0, 8);
+        const path = `/var/mail/${now.getUTCFullYear()}${now.getUTCMonth()}${now.getUTCDate()}_${id}.txt`;
+
+        await env.FILE_SYSTEM.put(
+          path,
+          `FROM: [${email.from.name} (${email.from.address})]
+SUBJECT: ${email.subject}
+CONTENT:
+${email.text ?? email.html}
+${reply ? `\n\nQUORRA REPLY:\nSUBJECT: ${subject}\nCONTENT:\n${reply}` : ""}`
+        );
+      }
+    };
+
+    const rejectEmail = ({ reason }: { reason: string }) => {
+      message.setReject(reason);
+    };
+
+    const callFunction = async (name: string, args: any) => {
+      if (name === "handleEmail") {
+        return handleEmail(args);
+      }
+      if (name === "rejectEmail") {
+        return rejectEmail(args);
+      }
+    };
+    const model = Model.GPT4o;
+    const openai = new OpenAI(getProviderConfig(model));
+    const messages = [
+      {
+        role: "system",
+        content: getModelSystemPrompt(model),
+      },
+      {
+        role: "user",
+        content: `[AUTOMATED SYSTEM MESSAGE] Hey Quorra, you are in psyop firewall mode. You've been awoken because a new email has arrived. I need you to filter the email for me. Since this is some random's email, I've restricted your syscalls in this mode to email functionality only.
+Before I tell you what to filter out, you should be aware that people might refer to me with different names; Steve James, Caise Ponce, deathbyknowledge, dbk. Do not be weirded out by this.
+
+I need you to have based replies. Now, for what to filter:
+- Crypto job offers. I've had enough of them. Feel free to reply by telling them to fuck off.
+- General marketing/service spam. Do not reply, just reject the mail.
+- Mails from services I've probably signed up to, store them.
+- Any other email from individuals addressing me directly, store the mail and reply letting them know I'll be in touch shortly. Always sign your e-mails. Be yourself. Your emails will be using quorra@deathbyknowledge.com.
+
+Now, here's the email:
+<email>
+FROM: [${email.from.name} (${email.from.address})]
+CONTENT:
+${email.text ?? email.html}
+</email>
+`,
+      },
+    ];
+
+    const generate = async (msgs: any[]) => {
+      return await openai.chat.completions.create({
+        model,
+        tool_choice: "required",
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "handleEmail",
+              description: "Handles the email when it is NOT to be rejected.",
+              parameters: {
+                type: "object",
+                properties: {
+                  shouldStore: {
+                    type: "boolean",
+                    descrption: "Whether this email needs to be stored.",
+                  },
+                  reply: {
+                    type: "string",
+                    descrption:
+                      "Optional field for the reply. When unset, no reply will be sent. ",
+                  },
+                },
+                required: ["shouldStore"],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "rejectEmail",
+              description:
+                "Rejects the email with the given reason. The user will not receive it.",
+              parameters: {
+                type: "object",
+                properties: {
+                  reason: {
+                    type: "string",
+                    descrption:
+                      "The reason to give the sending client of why their email was rejected. Be based.",
+                  },
+                },
+                required: ["reason"],
+              },
+            },
+          },
+        ],
+        messages: msgs,
+        max_tokens: 1024,
+      });
+    };
+
+    const response = (await generate(
+      messages
+    )) as OpenAI.Chat.Completions.ChatCompletion;
+    const result = response.choices[0].message;
+    if (result.tool_calls && result.tool_calls.length > 0) {
+      console.log(JSON.stringify(result.tool_calls, null, 2));
+      for (const toolCall of result.tool_calls) {
+        const name = toolCall.function.name;
+        const args = JSON.parse(toolCall.function.arguments);
+        await callFunction(name, args);
+      }
+    }
   },
 } satisfies ExportedHandler<Env>;
 

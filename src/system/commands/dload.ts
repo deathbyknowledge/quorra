@@ -16,7 +16,7 @@ export const dload: CommandFn = async (argv, { agent, term }) => {
   }
   const entry = await agent.call<FSEntry>("stat", [path]);
   if (!entry) {
-    term.writeln(`${path} does not exist.`);
+    term.writeln(`cd: no such file or directory: ${path}`);
   }
 
   const slugs = entry.path.split("/");

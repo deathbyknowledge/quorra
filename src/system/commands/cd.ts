@@ -1,7 +1,7 @@
 import commandLineArgs, {
   OptionDefinition,
 } from "../../libs/command-line-args";
-import {formatPrompt} from "../constants";
+import { formatPrompt } from "../constants";
 import { CommandFn } from "../types";
 
 export const options: OptionDefinition[] = [
@@ -15,7 +15,7 @@ export const cd: CommandFn = async (argv, { agent, term, prompt }) => {
     term.writeln("Usage: cd [path/to/folder]");
     return;
   }
-  if (!path.endsWith('/')) path += '/';
+  if (!path.endsWith("/")) path += "/";
 
   const cwd = await agent.call<string>("chdir", [path]);
   if (!cwd) return;
