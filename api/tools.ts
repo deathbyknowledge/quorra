@@ -37,6 +37,7 @@ const handleEmailDef = zodFunction({
 const createHandleEmail = async (
   env: Env,
   email: Email,
+  quorraAddr: string,
   sendReply: (from: string, to: string, content: string) => Promise<void>
 ) => {
   const replySubject = email.subject?.startsWith("Re: ")
@@ -56,7 +57,7 @@ const createHandleEmail = async (
       msg.setHeader("References", email.messageId); // also necessary for proper threading
       msg.setSender({
         name: "Quorra",
-        addr: QUORRA_MAIL,
+        addr: quorraAddr,
       });
       msg.setRecipient(email.from.address!);
       msg.setSubject(replySubject);
@@ -65,7 +66,7 @@ const createHandleEmail = async (
         data: reply,
       });
 
-      await sendReply(QUORRA_MAIL, email.from.address!, msg.asRaw());
+      await sendReply(quorraAddr, email.from.address!, msg.asRaw());
     }
 
     // TODO: remove `true` whenever we're ready for prod
@@ -113,22 +114,6 @@ const createRejectEmail =
     reject(reason);
   };
 
-//   {
-//     type: "function",
-//     function: {
-//       name: "readdir",
-//       description:
-//         "Lists file system entries in the specified directory path. Returns JSON array of entries, either files or directories with their paths.",
-//       parameters: {
-//         type: "object",
-//         properties: {
-//           path: { type: "string" },
-//         },
-//         required: ["path"],
-//       },
-//     },
-//   },
-
 /*
    ✨ PUTTING IT ALL TOGETHER ✨
 */
@@ -156,12 +141,18 @@ export const generateCallFunction = async (
 ) => {
   switch (mode) {
     case Mode.Email:
-      const { email, reject, sendReply } = args as {
+      const { email, reject, sendReply, quorraAddr } = args as {
         email: Email;
+        quorraAddr: string;
         reject: (reason: string) => void;
         sendReply: (from: string, to: string, content: string) => Promise<void>;
       };
-      const handleEmail = await createHandleEmail(env, email, sendReply);
+      const handleEmail = await createHandleEmail(
+        env,
+        email,
+        quorraAddr,
+        sendReply
+      );
       const rejectEmail = await createRejectEmail(reject);
       return async (name: string, args: any) => {
         if (name === EmailTools.HandleEmail) {
@@ -175,51 +166,5 @@ export const generateCallFunction = async (
       return (...args: any) => console.error("Unimplemented. Tried", args);
     default:
       throw "Trying to generate callFunction for an unsupported mode.";
-  }
-};
-
-// I had to createa Bot and add it install it with my Discord user.
-// I better write this down, otherwise I forget the steps I took.
-export const notifyUser = async (message: string) => {
-  // Send a DM to the hardcoded user ID via Discord API
-  const response = await fetch(
-    `https://discord.com/api/v10/users/@me/channels`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bot ${process.env.QUORRA_DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        recipient_id: process.env.DISCORD_USER_ID,
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error("Failed to create DM channel");
-  }
-
-  const channelData: any = await response.json();
-  const channelId = channelData.id;
-
-  // Send the message to the DM channel
-  const messageResponse = await fetch(
-    `https://discord.com/api/v10/channels/${channelId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bot ${process.env.QUORRA_DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        content: message,
-      }),
-    }
-  );
-
-  if (!messageResponse.ok) {
-    console.error("Failed to send message");
-    console.log(messageResponse.statusText);
   }
 };

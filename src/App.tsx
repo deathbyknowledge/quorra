@@ -5,6 +5,8 @@ import "./App.css";
 import { ContextProvider } from "./context/AppContext";
 import LoadingBorderWrapper from "./components/LoadingBorderWrapper";
 import { AuthContextProvider } from "./context/AuthContext";
+import Editor from '@monaco-editor/react';
+
 
 const App: React.FC = () => {
   return (
@@ -12,10 +14,11 @@ const App: React.FC = () => {
       <ContextProvider>
         <div className="column">
           <Header left="SYSTEM" right="ALT PANEL"/>
+          <Editor height="90vh" defaultLanguage="javascript" defaultValue="// some comment"  />          
         </div>
         <div
           style={{
-            width: "70%",
+            width: "100%",
             height: "90%",
             display: "flex",
             marginRight: "auto",
@@ -35,9 +38,9 @@ const App: React.FC = () => {
             </div>
           </LoadingBorderWrapper>
         </div>
-        <div className="column">
+        {/* <div className="column">
           <Header left="NETWORK" right="ALT PANEL"/>
-        </div>
+        </div> */}
       </ContextProvider>
     </AuthContextProvider>
   );

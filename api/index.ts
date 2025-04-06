@@ -7,14 +7,17 @@ import {
 import { runWithTools } from "@cloudflare/ai-utils";
 import { OpenAI } from "openai";
 import {
-  formatEmailAsString,
+  formatMailTask,
   getModelSystemPrompt,
   getProviderConfig,
+  MailConf,
   Model,
+  notifyUser,
 } from "./utils";
 import PostalMime from "postal-mime";
 import { generateCallFunction, getToolDefsByMode, Mode } from "./tools";
-import { QUORRA_MAIL_PROMPT_PREAMBLE } from "./constants";
+import { parse } from "toml";
+import { MAIL_CONF_PATH } from "./constants";
 
 type State = {
   cwd: string;
@@ -42,11 +45,6 @@ export class Quorra extends Agent<Env, State> {
     console.error(`[ERROR] Conn ${connection}: ${error}`);
   }
 
-  // async onRequest(_: Request): Promise<Response> {
-  //   await notifyUser("Good news: Quorra is online.");
-  //   return new Response(null, { status: 200 });
-  // }
-
   toAbsolutePath(path: string, dir = false) {
     // TODO: implement ..
     path = path.startsWith("/") ? path : this.state.cwd + path;
@@ -54,63 +52,88 @@ export class Quorra extends Agent<Env, State> {
     return path;
   }
 
+  info(message: string, data?: any) {
+    console.log(`INFO: ${message}`, data || "");
+  }
+
+  error(message: string, data?: any) {
+    let formatted = `[ERROR] ${message}`;
+    if (data) formatted += JSON.stringify(data);
+    console.warn(formatted);
+    this.ctx.waitUntil(notifyUser(formatted));
+  }
+
+  warn(message: string, data?: any) {
+    let formatted = `[WARN] ${message}`;
+    if (data) formatted += JSON.stringify(data);
+    console.error(formatted);
+    this.ctx.waitUntil(notifyUser(formatted));
+  }
+
   async automatedExecution({
-    ask,
+    task,
     deps,
     model = Model.GPT4o,
     mode = Mode.AllSyscalls,
     maxSequentialCalls = 1,
   }: {
-    ask: string;
+    task: string;
     maxSequentialCalls?: number;
     model?: Model;
     mode: Mode;
     deps?: any;
   }) {
-    const openai = new OpenAI(getProviderConfig(model));
-    const messages: any = [
-      {
-        role: "system",
-        content: getModelSystemPrompt(model),
-      },
-      {
-        role: "user",
-        content: ask,
-      },
-    ];
-    const tools = getToolDefsByMode(mode);
-    const callFunction = await generateCallFunction(mode, deps, this.env);
+    try {
+      const openai = new OpenAI(getProviderConfig(model));
+      const messages: any = [
+        {
+          role: "system",
+          content: getModelSystemPrompt(model),
+        },
+        {
+          role: "user",
+          content: task,
+        },
+      ];
+      const tools = getToolDefsByMode(mode);
+      const callFunction = await generateCallFunction(mode, deps, this.env);
 
-    let i = 0;
-    while (true) {
-      const response = await openai.chat.completions.create({
-        model,
-        tools,
-        messages,
-        tool_choice: i === 0 ? "required" : "auto",
-        max_tokens: 2048,
-      });
-      const result = response.choices[0].message;
-      if (result.tool_calls && result.tool_calls.length > 0) {
-        messages.push({
-          role: result.role,
-          tool_calls: result.tool_calls,
+      let i = 0;
+      while (true) {
+        const response = await openai.chat.completions.create({
+          model,
+          tools,
+          messages,
+          tool_choice: i === 0 ? "required" : "auto",
+          max_tokens: 2048,
         });
-        for (const toolCall of result.tool_calls) {
-          const name = toolCall.function.name;
-          const args = JSON.parse(toolCall.function.arguments);
-          const toolResponse = await callFunction(name, args);
+        const result = response.choices[0].message;
+        if (result.tool_calls && result.tool_calls.length > 0) {
           messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(toolResponse),
+            role: result.role,
+            tool_calls: result.tool_calls,
           });
+          for (const toolCall of result.tool_calls) {
+            const name = toolCall.function.name;
+            const args = JSON.parse(toolCall.function.arguments);
+            const toolResponse = await callFunction(name, args);
+            messages.push({
+              role: "tool",
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(toolResponse),
+            });
+          }
         }
+        i++;
+        // exit if reached the limit of sequential calls
+        if (i >= maxSequentialCalls) return;
+        continue;
       }
-      i++;
-      // exit if reached the limit of sequential calls
-      if (i >= maxSequentialCalls) return;
-      continue;
+    } catch (e: any) {
+      if (!(e instanceof Error)) {
+        e = new Error(e);
+      }
+      this.error(`-- DURING AUTOMATED EXECUTION --${e.name}: ${e.message}`);
     }
   }
 
@@ -256,7 +279,7 @@ ${content}
       },
       { maxRecursiveToolRuns: 1 }
     );
-    console.log("finished running task.");
+    this.info("finished running task.");
   }
 
   /*
@@ -341,8 +364,11 @@ ${content}
       (async () => {
         try {
           await uploadPromise;
-        } catch (e) {
-          console.error(e);
+        } catch (e: any) {
+          if (!(e instanceof Error)) {
+            e = new Error(e);
+          }
+          this.error(`-- DURING OPEN --${e.name}: ${e.message}`);
         } finally {
           openFileDescriptors.delete(path);
         }
@@ -432,7 +458,6 @@ export type FSEntry = {
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
-
     if (url.pathname === "/api/verify") {
       const b64Key = readCookieValue(request, "auth");
       if (!b64Key) return Response.json({ valid: false }, { status: 401 });
@@ -459,27 +484,42 @@ export default {
   // Requires an Email Route to be set up to this worker.
   // I deployed the handler and that made it available in the CF Dashboard under Account > Zone > Email Routing.
   async email(message: ForwardableEmailMessage, env: Env) {
-    const email = await PostalMime.parse(message.raw);
     const quorra = await getAgentByName<Env, Quorra>(env.Quorra, "quorra");
-    const deps = {
-      email,
-      reject: (str: string) => message.setReject(str),
-      sendReply: async (from: string, to: string, content: string) => {
-        const { EmailMessage } = await import("cloudflare:email");
-        // creating EmailMessage from the Quorra DO breaks. Have to create it here.
-        const replyMessage = new EmailMessage(from, to, content);
-        await message.reply(replyMessage);
-      },
-    };
-    const formattedEmail = formatEmailAsString(
-      email.from,
-      email.subject ?? "",
-      email.text ?? email.html ?? ""
-    );
+    try {
+      const email = await PostalMime.parse(message.raw);
+      let conf: Partial<MailConf> = {};
+      const obj = await env.FILE_SYSTEM.get(MAIL_CONF_PATH);
+      if (obj && obj.body) {
+        const content = await obj.text();
+        await quorra.info("Found conf file, using it...", content);
+        conf = parse(content) as any;
+        await quorra.info("Found conf file, using it...");
+      } else {
+        await quorra.warn(
+          `Processing email without a configuration file. Replies will only be logged, not delivered. Add it in ${MAIL_CONF_PATH}.`
+        );
+      }
+      const task = formatMailTask(conf, email);
+      await quorra.info(`Found prompt`, task);
 
-    const ask =
-      QUORRA_MAIL_PROMPT_PREAMBLE + `<email>\n${formattedEmail}\n</email>`;
-    await quorra.automatedExecution({ ask, deps, mode: Mode.Email });
+      const deps = {
+        email,
+        reject: (str: string) => message.setReject(str),
+        sendReply: async (from: string, to: string, content: string) => {
+          const { EmailMessage } = await import("cloudflare:email");
+          // creating EmailMessage from the Quorra DO breaks. Have to create it here.
+          if (!conf?.quorra_addr) return;
+          const replyMessage = new EmailMessage(from, to, content);
+          await message.reply(replyMessage);
+        },
+      };
+      await quorra.automatedExecution({ task, deps, mode: Mode.Email });
+    } catch (e: any) {
+      if (!(e instanceof Error)) {
+        e = new Error(e);
+      }
+      await quorra.error(`-- DURING EMAIL --${e.name}: ${e.message}`);
+    }
   },
 } satisfies ExportedHandler<Env>;
 
