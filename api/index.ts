@@ -96,7 +96,7 @@ export class Quorra extends Agent<Env, State> {
         },
       ];
       const tools = getToolDefsByMode(mode);
-      const callFunction = await generateCallFunction(mode, deps, this.env);
+      const callFunction = await generateCallFunction(mode, deps, this);
 
       let i = 0;
       while (true) {
@@ -165,7 +165,7 @@ export class Quorra extends Agent<Env, State> {
       },
     ];
     const tools = getToolDefsByMode(mode);
-    const callFunction = await generateCallFunction(mode, deps, this.env);
+    const callFunction = await generateCallFunction(mode, deps, this);
 
     if (stream) {
       // return a ReadableStream including only output text

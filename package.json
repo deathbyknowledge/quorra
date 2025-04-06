@@ -9,7 +9,7 @@
 		"lint": "eslint .",
 		"preview": "npm run build && vite preview",
 		"deploy": "npm run build && wrangler deploy",
-		"cf-typegen": "wrangler types"
+		"types": "wrangler types"
 	},
 	"dependencies": {
 		"@cloudflare/ai-utils": "^1.0.1",
@@ -17,12 +17,11 @@
 		"@types/wicg-file-system-access": "^2023.10.5",
 		"@xterm/addon-fit": "^0.10.0",
 		"@xterm/xterm": "^5.5.0",
-		"agents": "^0.0.46",
+		"agents": "^0.0.53",
 		"array-back": "^6.2.2",
 		"find-replace": "^5.0.2",
 		"mimetext": "^3.0.27",
-		"miniflare": "^4.20250321.1",
-		"node": "^18.20.8",
+		"miniflare": "^4.20250404.0",
 		"openai": "^4.91.1",
 		"postal-mime": "^2.4.3",
 		"react": "^18.3.1",
@@ -32,7 +31,7 @@
 		"uuid": "^11.1.0"
 	},
 	"devDependencies": {
-		"@cloudflare/vite-plugin": "^0.1.19",
+		"@cloudflare/vite-plugin": "^0.1.21",
 		"@eslint/js": "^9.17.0",
 		"@types/jmespath": "^0.15.2",
 		"@types/node": "^22.13.14",
@@ -46,7 +45,7 @@
 		"onchange": "^7.1.0",
 		"typescript": "~5.6.2",
 		"typescript-eslint": "^8.18.2",
-		"vite": "^6.2.3",
-		"wrangler": "^4.7.0"
+		"vite": "^6.2.5",
+		"wrangler": "^4.7.2"
 	}
 }

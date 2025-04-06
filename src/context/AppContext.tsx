@@ -19,6 +19,8 @@ export type AppContext = {
   agent?: ReturnType<typeof useAgent<AgentState>>;
   agentState?: AgentState;
   established: boolean;
+  editingFile?: string;
+  setFilePath: (path: string) => void;
   term?: Terminal;
   prompt: MutableRefObject<string>;
 };
@@ -26,6 +28,7 @@ export type AppContext = {
 const AppContext = createContext<AppContext>({
   animationLoading: true,
   setAnimationLoading: () => {},
+  setFilePath: () => {},
   established: false,
   prompt: {} as MutableRefObject<string>,
 });
@@ -38,6 +41,7 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const [animationLoading, setAnimationLoading] = useState(true);
   const [agentState, _setAgentState] = useState<AgentState | undefined>();
   const [established, setEstablished] = useState(false);
+  const [filePath, setFilePath] = useState<string | undefined>();
   const { key } = useAuthContext();
   const prompt = useRef("$ ");
   const term = useMemo(() => {
@@ -89,6 +93,8 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
         established,
         agentState,
         setAnimationLoading,
+        setFilePath,
+        editingFile: filePath,
         term,
         prompt,
       }}

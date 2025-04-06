@@ -4,6 +4,8 @@ import { createMimeMessage } from "mimetext";
 import { Email } from "postal-mime";
 import { formatEmailAsString } from "./utils";
 import { QUORRA_MAIL } from "./constants";
+import { Quorra } from ".";
+import { env } from "cloudflare:workers";
 
 /*
     EMAIL TOOLS
@@ -12,6 +14,29 @@ enum EmailTools {
   HandleEmail = "handleEmail",
   RejectEmail = "rejectEmail",
 }
+
+enum SysTools {
+  ReadDir = "readDirectory",
+}
+const ReadDirParameters = z
+  .object({
+    path: z.string().describe("The path of the directory to list."),
+  })
+  .required({ path: true });
+
+type ReadDirParams = z.infer<typeof ReadDirParameters>;
+
+const readDirDef = zodFunction({
+  name: SysTools.ReadDir,
+  parameters: ReadDirParameters,
+  description: "Lists the file system entries of the directory specified.",
+});
+
+const createReadDir = (quorra: Quorra) => {
+  return async (args: ReadDirParams) => {
+    return await quorra.readdir(args);
+  };
+};
 
 // Handle Email. Decides wether to store an incoming email and if to possibly reply to it.
 const HandleEmailParameters = z
@@ -35,7 +60,6 @@ const handleEmailDef = zodFunction({
 });
 
 const createHandleEmail = async (
-  env: Env,
   email: Email,
   quorraAddr: string,
   sendReply: (from: string, to: string, content: string) => Promise<void>
@@ -127,7 +151,7 @@ export const getToolDefsByMode = (mode: Mode) => {
     case Mode.Email:
       return [handleEmailDef, rejectEmailDef];
     case Mode.AllSyscalls:
-      return [];
+      return [readDirDef];
     default:
       throw "Trying to get tools for an unsupported mode.";
   }
@@ -137,7 +161,7 @@ export const getToolDefsByMode = (mode: Mode) => {
 export const generateCallFunction = async (
   mode: Mode,
   args: unknown,
-  env: Env
+  quorra: Quorra //quorra instance
 ) => {
   switch (mode) {
     case Mode.Email:
@@ -147,12 +171,7 @@ export const generateCallFunction = async (
         reject: (reason: string) => void;
         sendReply: (from: string, to: string, content: string) => Promise<void>;
       };
-      const handleEmail = await createHandleEmail(
-        env,
-        email,
-        quorraAddr,
-        sendReply
-      );
+      const handleEmail = await createHandleEmail(email, quorraAddr, sendReply);
       const rejectEmail = await createRejectEmail(reject);
       return async (name: string, args: any) => {
         if (name === EmailTools.HandleEmail) {
@@ -163,7 +182,12 @@ export const generateCallFunction = async (
         }
       };
     case Mode.AllSyscalls:
-      return (...args: any) => console.error("Unimplemented. Tried", args);
+      const readDir = createReadDir(quorra);
+      return async (name: string, args: any) => {
+        if (name === SysTools.ReadDir) {
+          return await readDir(args);
+        }
+      };
     default:
       throw "Trying to generate callFunction for an unsupported mode.";
   }
