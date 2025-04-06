@@ -66,4 +66,7 @@ export const commands: { [key: string]: CommandFn } = {
   open: async (args, ctx) => {
     ctx.setFilePath(args[0]);
   },
+  close: async (_, ctx) => {
+    ctx.setFilePath(undefined as any);
+  },
 };

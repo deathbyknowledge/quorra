@@ -4,6 +4,8 @@ import React, { useEffect, useRef, useState } from "react";
 import LoadingBorderWrapper from "./LoadingBorderWrapper";
 import { useAppContext } from "../context/AppContext";
 import { FSEntry } from "../system/types";
+import "../App.css";
+import { Header } from "./Header";
 
 export const Editor: React.FC = () => {
   const { editingFile: filePath, agent } = useAppContext();
@@ -34,6 +36,7 @@ export const Editor: React.FC = () => {
           //   onError: (e) => term.writeln(`Error: ${e}`),
         });
       }
+      if (!filePath) setLoading(true);
     };
     loadContent();
   }, [filePath]);
@@ -107,18 +110,29 @@ export const Editor: React.FC = () => {
       },
     });
   };
-  return (
-    <>
-      {filePath && (
-        <LoadingBorderWrapper
-          borderColor="var(--color-line)"
-          borderWidth="1px"
-          animationSpeed={1}
-          onFinish={() => setLoading(false)}
-        >
-          <div style={{ height: "100%" }}>
-            {!loading && <MonacoEditor
+  return filePath ? (
+    <div
+      className="column"
+      style={{
+        width: "55%",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        gap: "20px",
+      }}
+    >
+      <Header left="LINE" right={filePath} />
+      <LoadingBorderWrapper
+        borderColor="var(--color-line)"
+        borderWidth="1px"
+        animationSpeed={1}
+        onFinish={() => setLoading(false)}
+      >
+        <div style={{ height: "100%", width: "100%", background: "var(--background)" }}>
+          {!loading && (
+            <MonacoEditor
               height="100%"
+              width="100%"
               defaultLanguage="text" // Or "bash" if you're editing shell scripts
               defaultValue={fileContent}
               theme="terminalTheme" // Apply the custom theme
@@ -128,7 +142,7 @@ export const Editor: React.FC = () => {
                 // Match the terminal's minimalism
                 minimap: { enabled: false }, // No minimap
                 scrollBeyondLastLine: false, // No extra scroll space
-                fontSize: 14, // Typical terminal font size
+                fontSize: 15, // Typical terminal font size
                 fontFamily: "'Courier New', monospace", // Monospaced font like a terminal
                 lineNumbers: "on", // Keep line numbers, but minimal
                 folding: false, // No code folding
@@ -143,10 +157,12 @@ export const Editor: React.FC = () => {
                   useShadows: false, // No shadows on scrollbars
                 },
               }}
-            />}
-          </div>
-        </LoadingBorderWrapper>
-      )}
-    </>
+            />
+          )}
+        </div>
+      </LoadingBorderWrapper>
+    </div>
+  ) : (
+    <div />
   );
 };
