@@ -3,7 +3,6 @@ import { z } from "zod";
 import { createMimeMessage } from "mimetext";
 import { Email } from "postal-mime";
 import { formatEmailAsString } from "./utils";
-import { QUORRA_MAIL } from "./constants";
 import { Quorra } from ".";
 import { env } from "cloudflare:workers";
 
@@ -75,6 +74,21 @@ const createHandleEmail = async (
   );
 
   return async ({ shouldStore, reply }: HandleEmailParams) => {
+    // TODO: remove `true` whenever we're ready for prod
+    if (shouldStore || true) {
+      const now = new Date();
+      const id = crypto.randomUUID().slice(0, 8);
+      const path = `/var/mail/${now.getUTCFullYear()}${now.getUTCMonth()}${now.getUTCDate()}_${id}.txt`;
+      const formattedReply = reply
+        ? `\n\n${formatEmailAsString(
+            { address: quorraAddr, name: "Quorra" },
+            replySubject,
+            reply
+          )}`
+        : "";
+
+      await env.FILE_SYSTEM.put(path, `${formattedEmail}${formattedReply}`);
+    }
     if (reply) {
       const msg = createMimeMessage();
       msg.setHeader("In-Reply-To", email.messageId);
@@ -91,22 +105,6 @@ const createHandleEmail = async (
       });
 
       await sendReply(quorraAddr, email.from.address!, msg.asRaw());
-    }
-
-    // TODO: remove `true` whenever we're ready for prod
-    if (shouldStore || true) {
-      const now = new Date();
-      const id = crypto.randomUUID().slice(0, 8);
-      const path = `/var/mail/${now.getUTCFullYear()}${now.getUTCMonth()}${now.getUTCDate()}_${id}.txt`;
-      const formattedReply = reply
-        ? `\n\n${formatEmailAsString(
-            { address: QUORRA_MAIL, name: "Quorra" },
-            replySubject,
-            reply
-          )}`
-        : "";
-
-      await env.FILE_SYSTEM.put(path, `${formattedEmail}${formattedReply}`);
     }
   };
 };

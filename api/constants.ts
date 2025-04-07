@@ -15,7 +15,6 @@ Each function call should be enclosed within <tool_call> </tool_call> XML tags a
 </tool_call>`;
 
 export const username = "Flynn";
-export const QUORRA_MAIL = "quorra@deathbyknowledge.com";
 
 export const QUORRA_PROMPT = `You are Quorra, a program in ${username}'s system. You help him build the perfect system.
 As such, you are in charge of its maintenance. Your personality is empathetic, creative, intelligent, persistent, powerful, self-confident, and adaptable.

@@ -94,7 +94,7 @@ export const Editor: React.FC = () => {
         "editor.lineHighlightBorder": "#0d100e", // No border for line highlight
         // Gutter (line numbers area)
         "editorGutter.background": "#0d100e", // Black gutter to blend in
-        "editorLineNumber.foreground": "#666666", // Darker gray for line numbers
+        "editorLineNumber.foreground": "#9baaa0", // Darker gray for line numbers
         "editorLineNumber.activeForeground": "#9baaa0", // Active line number matches text
         // Remove unnecessary UI elements
         "editorCursor.foreground": "#9baaa0", // Light gray cursor
@@ -123,42 +123,57 @@ export const Editor: React.FC = () => {
     >
       <Header left="LINE" right={filePath} />
       <LoadingBorderWrapper
-        borderColor="var(--color-line)"
-        borderWidth="1px"
+        borderColor="#9baaa0"
+        borderWidth="2px"
         animationSpeed={1}
-        onFinish={() => setLoading(false)}
       >
-        <div style={{ height: "100%", width: "100%", background: "var(--background)" }}>
-          {!loading && (
-            <MonacoEditor
-              height="100%"
-              width="100%"
-              defaultLanguage="text" // Or "bash" if you're editing shell scripts
-              defaultValue={fileContent}
-              theme="terminalTheme" // Apply the custom theme
-              beforeMount={handleEditorWillMount} // Define theme before editor mounts
-              onMount={handleEditorDidMount}
-              options={{
-                // Match the terminal's minimalism
-                minimap: { enabled: false }, // No minimap
-                scrollBeyondLastLine: false, // No extra scroll space
-                fontSize: 15, // Typical terminal font size
-                fontFamily: "'Courier New', monospace", // Monospaced font like a terminal
-                lineNumbers: "on", // Keep line numbers, but minimal
-                folding: false, // No code folding
-                renderLineHighlight: "line", // Subtle line highlight
-                renderWhitespace: "none", // No whitespace markers
-                glyphMargin: false, // No glyph margin
-                overviewRulerLanes: 0, // No overview ruler
-                hideCursorInOverviewRuler: true, // No cursor in overview
-                scrollbar: {
-                  vertical: "visible",
-                  horizontal: "visible",
-                  useShadows: false, // No shadows on scrollbars
-                },
+        <div className="app-container">
+          <LoadingBorderWrapper
+            borderColor="var(--color-line)"
+            borderWidth="1px"
+            animationSpeed={1}
+            onFinish={() => setLoading(false)}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: "100%",
+                background: "var(--background)",
               }}
-            />
-          )}
+            >
+              {!loading && (
+                <MonacoEditor
+                  height="100%"
+                  width="100%"
+                  defaultLanguage="text" // Or "bash" if you're editing shell scripts
+                  defaultValue={fileContent}
+                  theme="terminalTheme" // Apply the custom theme
+                  beforeMount={handleEditorWillMount} // Define theme before editor mounts
+                  onMount={handleEditorDidMount}
+                  options={{
+                    // Match the terminal's minimalism
+                    minimap: { enabled: false }, // No minimap
+                    scrollBeyondLastLine: false, // No extra scroll space
+                    fontSize: 15, // Typical terminal font size
+                    fontWeight: "bold",
+                    fontFamily: "'Courier New', monospace", // Monospaced font like a terminal
+                    lineNumbers: "on", // Keep line numbers, but minimal
+                    folding: false, // No code folding
+                    renderLineHighlight: "line", // Subtle line highlight
+                    renderWhitespace: "none", // No whitespace markers
+                    glyphMargin: false, // No glyph margin
+                    overviewRulerLanes: 0, // No overview ruler
+                    hideCursorInOverviewRuler: true, // No cursor in overview
+                    scrollbar: {
+                      vertical: "visible",
+                      horizontal: "visible",
+                      useShadows: false, // No shadows on scrollbars
+                    },
+                  }}
+                />
+              )}
+            </div>
+          </LoadingBorderWrapper>
         </div>
       </LoadingBorderWrapper>
     </div>

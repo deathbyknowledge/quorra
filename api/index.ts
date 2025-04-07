@@ -133,7 +133,7 @@ export class Quorra extends Agent<Env, State> {
       if (!(e instanceof Error)) {
         e = new Error(e);
       }
-      this.error(`-- DURING AUTOMATED EXECUTION --${e.name}: ${e.message}`);
+      this.error(`-- DURING AUTOMATED EXECUTION --${e.name}: ${e.message}. Stack: ${e.stack}`);
     }
   }
 
@@ -491,19 +491,18 @@ export default {
       const obj = await env.FILE_SYSTEM.get(MAIL_CONF_PATH);
       if (obj && obj.body) {
         const content = await obj.text();
-        await quorra.info("Found conf file, using it...", content);
         conf = parse(content) as any;
-        await quorra.info("Found conf file, using it...");
       } else {
         await quorra.warn(
           `Processing email without a configuration file. Replies will only be logged, not delivered. Add it in ${MAIL_CONF_PATH}.`
         );
       }
       const task = formatMailTask(conf, email);
-      await quorra.info(`Found prompt`, task);
+      await quorra.info(`task to run`, task);
 
       const deps = {
         email,
+        quorraAddr: conf.quorra_addr ?? 'quorrahasnoaddress@mail.com',
         reject: (str: string) => message.setReject(str),
         sendReply: async (from: string, to: string, content: string) => {
           const { EmailMessage } = await import("cloudflare:email");
