@@ -6,5 +6,5 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 // https://vite.dev/config/
 export default defineConfig({
   esbuild: { target: "es2022" },
-  plugins: [react(), cloudflare({})],
+  plugins: [react(), cloudflare()],
 });

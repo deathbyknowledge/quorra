@@ -9,7 +9,7 @@
   "compatibility_date": "2025-04-01",
   "compatibility_flags": [ "nodejs_compat", "nodejs_compat_populate_process_env" ],
   "assets": {
-    "not_found_handling": "single-page-application",
+    "not_found_handling": "404-page",
     "binding": "ASSETS"
   },
   "ai": { "binding": "AI" },

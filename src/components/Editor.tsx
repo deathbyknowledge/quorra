@@ -158,6 +158,7 @@ export const Editor: React.FC = () => {
                     fontWeight: "bold",
                     fontFamily: "'Courier New', monospace", // Monospaced font like a terminal
                     lineNumbers: "on", // Keep line numbers, but minimal
+                    wordWrap: "on",
                     folding: false, // No code folding
                     renderLineHighlight: "line", // Subtle line highlight
                     renderWhitespace: "none", // No whitespace markers

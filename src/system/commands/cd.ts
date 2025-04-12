@@ -18,6 +18,9 @@ export const cd: CommandFn = async (argv, { agent, term, prompt }) => {
   if (!path.endsWith("/")) path += "/";
 
   const cwd = await agent.call<string>("chdir", [path]);
-  if (!cwd) return;
+  if (!cwd) {
+    term.writeln(`cd: no such directory: ${path}`);
+    return;
+  }
   prompt.current = formatPrompt(cwd);
 };

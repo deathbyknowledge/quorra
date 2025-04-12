@@ -4,26 +4,32 @@ import {
   unstable_callable as callable,
   StreamingResponse,
 } from "agents";
-import { runWithTools } from "@cloudflare/ai-utils";
 import { OpenAI } from "openai";
 import {
+  execWithTools,
   formatMailTask,
+  getActionPrompt,
   getModelSystemPrompt,
   getProviderConfig,
+  getReasoningPrompt,
   MailConf,
   Model,
   notifyUser,
+  toAbsolutePath,
 } from "./utils";
 import PostalMime from "postal-mime";
 import { generateCallFunction, getToolDefsByMode, Mode } from "./tools";
 import { parse } from "toml";
 import { MAIL_CONF_PATH } from "./constants";
+import { z } from "zod";
+import { jsonrepair } from "jsonrepair";
+import { fs } from "./fs";
 
 type State = {
   cwd: string;
 };
 
-enum Owner {
+export enum Owner {
   System = "system",
   User = "user",
   Quorra = "quorra",
@@ -31,7 +37,10 @@ enum Owner {
 
 const INITIAL_STATE: State = { cwd: "/" };
 
-const openFileDescriptors = new Map<string, WritableStream>();
+const PROCS = new Map<
+  string,
+  { promise: Promise<void>; aborted: boolean; cwd: string; summary: string }
+>();
 
 export class Quorra extends Agent<Env, State> {
   async onStart(): Promise<void> {
@@ -45,13 +54,6 @@ export class Quorra extends Agent<Env, State> {
     console.error(`[ERROR] Conn ${connection}: ${error}`);
   }
 
-  toAbsolutePath(path: string, dir = false) {
-    // TODO: implement ..
-    path = path.startsWith("/") ? path : this.state.cwd + path;
-    if (dir && !path.endsWith("/")) path += "/";
-    return path;
-  }
-
   info(message: string, data?: any) {
     console.log(`INFO: ${message}`, data || "");
   }
@@ -60,95 +62,24 @@ export class Quorra extends Agent<Env, State> {
     let formatted = `[ERROR] ${message}`;
     if (data) formatted += JSON.stringify(data);
     console.warn(formatted);
-    this.ctx.waitUntil(notifyUser(formatted));
+    notifyUser(formatted);
   }
 
   warn(message: string, data?: any) {
     let formatted = `[WARN] ${message}`;
     if (data) formatted += JSON.stringify(data);
     console.error(formatted);
-    this.ctx.waitUntil(notifyUser(formatted));
-  }
-
-  async automatedExecution({
-    task,
-    deps,
-    model = Model.GPT4o,
-    mode = Mode.AllSyscalls,
-    maxSequentialCalls = 1,
-  }: {
-    task: string;
-    maxSequentialCalls?: number;
-    model?: Model;
-    mode: Mode;
-    deps?: any;
-  }) {
-    try {
-      const openai = new OpenAI(getProviderConfig(model));
-      const messages: any = [
-        {
-          role: "system",
-          content: getModelSystemPrompt(model),
-        },
-        {
-          role: "user",
-          content: task,
-        },
-      ];
-      const tools = getToolDefsByMode(mode);
-      const callFunction = await generateCallFunction(mode, deps, this);
-
-      let i = 0;
-      while (true) {
-        const response = await openai.chat.completions.create({
-          model,
-          tools,
-          messages,
-          tool_choice: i === 0 ? "required" : "auto",
-          max_tokens: 2048,
-        });
-        const result = response.choices[0].message;
-        if (result.tool_calls && result.tool_calls.length > 0) {
-          messages.push({
-            role: result.role,
-            tool_calls: result.tool_calls,
-          });
-          for (const toolCall of result.tool_calls) {
-            const name = toolCall.function.name;
-            const args = JSON.parse(toolCall.function.arguments);
-            const toolResponse = await callFunction(name, args);
-            messages.push({
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify(toolResponse),
-            });
-          }
-        }
-        i++;
-        // exit if reached the limit of sequential calls
-        if (i >= maxSequentialCalls) return;
-        continue;
-      }
-    } catch (e: any) {
-      if (!(e instanceof Error)) {
-        e = new Error(e);
-      }
-      this.error(`-- DURING AUTOMATED EXECUTION --${e.name}: ${e.message}. Stack: ${e.stack}`);
-    }
+    notifyUser(formatted);
   }
 
   @callable()
   async ask({
     ask,
-    deps,
     model = Model.GPT4o,
-    mode = Mode.AllSyscalls,
     stream = false,
     maxSequentialCalls = 3,
   }: {
     ask: string;
-    mode: Mode;
-    deps?: any;
     model?: Model;
     stream?: boolean;
     maxSequentialCalls?: number;
@@ -164,8 +95,10 @@ export class Quorra extends Agent<Env, State> {
         content: ask,
       },
     ];
-    const tools = getToolDefsByMode(mode);
-    const callFunction = await generateCallFunction(mode, deps, this);
+    const tools = getToolDefsByMode(Mode.AllSyscalls);
+    const callFunction = generateCallFunction(Mode.AllSyscalls, {
+      cwd: this.state.cwd,
+    });
 
     if (stream) {
       // return a ReadableStream including only output text
@@ -179,6 +112,7 @@ export class Quorra extends Agent<Env, State> {
       return new ReadableStream({
         async start(controller) {
           for await (const chunk of stream) {
+            // TODO: handle tool calls
             if (chunk.choices)
               controller.enqueue(chunk.choices[0].delta.content);
           }
@@ -188,30 +122,29 @@ export class Quorra extends Agent<Env, State> {
     } else {
       let i = 0;
       while (true) {
-        const response = await openai.chat.completions.create({
+        const res = await execWithTools({
           model,
-          tools,
+          provider: openai,
           messages,
-          max_tokens: 2048,
+          tools,
+          callFunction,
         });
-        const result = response.choices[0].message;
-        if (result.tool_calls && result.tool_calls.length > 0) {
+        if (typeof res === "string") {
+          return res; // model responded with text
+        } else if (Array.isArray(res)) {
+          const tool_calls = res.map((result) => result.call);
           messages.push({
-            role: result.role,
-            tool_calls: result.tool_calls,
+            role: "assistant",
+            tool_calls,
           } as any);
-          for (const toolCall of result.tool_calls) {
-            const name = toolCall.function.name;
-            const args = JSON.parse(toolCall.function.arguments);
-            const toolResponse = await callFunction(name, args);
-            messages.push({
+          res.forEach((result) => {
+            const msg = {
               role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify(toolResponse),
-            });
-          }
-        } else {
-          return result.content;
+              tool_call_id: result.call.id,
+              content: JSON.stringify(result.result),
+            };
+            messages.push(msg);
+          });
         }
         i++;
         // exit if reached the limit of sequential calls
@@ -221,174 +154,208 @@ export class Quorra extends Agent<Env, State> {
     }
   }
 
-  async runs() {
-    const writeToDisk = async (args: { path: string; content: string }) => {
-      try {
-        const { path, content } = args;
-        await this.env.FILE_SYSTEM.put(path, content, {
-          customMetadata: { owner: Owner.Quorra },
-        });
-        return "Successfully wrote to disk.";
-      } catch (e) {
-        return "Failed to write to disk.";
-      }
+  async autonomousProcess(id: string, goal: string) {
+    const CWD = `/proc/${id}/`; // Unique CWD per task
+    await Promise.all([
+      this.env.FILE_SYSTEM.put(CWD + "GOAL.md", goal), // should probably have the model expand on this first
+      this.env.FILE_SYSTEM.put(
+        CWD + "SCRATCHPAD.md",
+        "# Iteration 0\nInitial state. Task goal defined in GOAL.md. Ready to determine the first action."
+      ),
+      this.env.FILE_SYSTEM.put(CWD + "PLAN.md", "- Action: START"), // Placeholder
+    ]);
+
+    // Model setup
+    const tools = getToolDefsByMode(Mode.AllSyscalls);
+    const actionModel = Model.DeepSeekV3;
+    const actionProvider = new OpenAI(getProviderConfig(actionModel));
+    const reasonModel = Model.DeepSeekR1;
+    const reasonProvider = new OpenAI(getProviderConfig(reasonModel));
+    const callFunction = generateCallFunction(Mode.AllSyscalls, {
+      cwd: this.state.cwd, // tool calls will use the CWD from the user, not the task.
+    });
+
+    const cleanup = async () => {
+      PROCS.delete(id);
+      await this.env.FILE_SYSTEM.delete([
+        CWD + "GOAL.md",
+        CWD + "SCRATCHPAD.md",
+        CWD + "PLAN.md",
+      ]);
     };
 
-    const obj = await this.env.FILE_SYSTEM.get("/sam/status.txt");
-    const content = await obj?.text();
-    await runWithTools(
-      this.env.AI as any,
-      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-      {
+    const maxIter = 15;
+    let iter = 0;
+    while (maxIter > iter) {
+      // CHECK IF HAS BEEN ABORTED
+      let proc = PROCS.get(id);
+      if (!proc || proc.aborted) {
+        await notifyUser(`[TASK ${id}] Received abort signal. Aborting...`);
+        await cleanup();
+        return;
+      }
+      iter += 1;
+      const objects = await Promise.all([
+        this.env.FILE_SYSTEM.get(CWD + "GOAL.md"), // should probably have the model expand on this first
+        this.env.FILE_SYSTEM.get(CWD + "SCRATCHPAD.md"),
+        this.env.FILE_SYSTEM.get(CWD + "PLAN.md"), // Placeholder
+      ]);
+      const files = await Promise.all(objects.map((obj) => obj?.text()));
+      if (files.includes(undefined)) {
+        this.error("Task required files did not exist. Aborting...");
+        return;
+      }
+      const [goal, scratchpad, plan] = files as string[];
+      // STEP 1: ACTION AGENT EXECUTES TOOLS.
+      const execResult = await execWithTools({
+        model: actionModel,
+        provider: actionProvider,
         messages: [
           {
             role: "system",
-            content:
-              "You are Quorra, the first ISO (Isomorphic Algorithm). You live in Sam's system for now. You have access to a few tools to interact with the system.",
+            content: getActionPrompt(goal, scratchpad, plan),
           },
+        ],
+        tools,
+        callFunction,
+        options: {
+          temp: 0.2,
+          topP: 0.95,
+          toolChoice: "required",
+          maxTokens: 4096,
+        },
+      });
+      const toolCalls: { name: string; args: string }[] = [];
+      const toolResults: { name: string; result: string }[] = [];
+      if (typeof execResult === "string") {
+        // should never happen
+        this.error(
+          `Model was supposed to call a tool. Instead it said ${execResult}`
+        );
+      } else if (Array.isArray(execResult)) {
+        execResult.forEach((result) => {
+          const name = result.call.function.name;
+          toolCalls.push({ name, args: result.call.function.arguments });
+          toolResults.push({ name, result: JSON.stringify(result.result) });
+        });
+      }
+
+      const ReasonResult = z
+        .object({
+          scratchpad_update: z.string(),
+          next_plan: z.string(),
+          is_complete: z.boolean(),
+        })
+        .required({
+          is_complete: true,
+          next_plan: true,
+          scratchpad_update: true,
+        });
+
+      // Check if aborted again after first Agent call.
+      proc = PROCS.get(id);
+      if (!proc || proc.aborted) {
+        await notifyUser(`[TASK ${id}] Received abort signal. Aborting...`);
+        await cleanup();
+        return;
+      }
+
+      // STEP 2: REASON AGENT
+      const reasonResponse = await reasonProvider.chat.completions.create({
+        model: reasonModel,
+        messages: [
           {
             role: "user",
-            content: `Output from file /sam/status.txt:
-${content}
-`,
+            content: getReasoningPrompt(
+              goal,
+              scratchpad,
+              plan,
+              toolCalls,
+              toolResults
+            ),
           },
         ],
-        tools: [
-          {
-            name: "writeToDisk",
-            description:
-              "Write the [content] text to disk in the specified [path].",
-            parameters: {
-              type: "object",
-              properties: {
-                path: {
-                  type: "string",
-                  description: "Absolute path of the file to write",
-                },
-                content: {
-                  type: "string",
-                  description: "Content of the file.",
-                },
-              },
-              required: ["path", "content"],
-            },
-            // reference to previously defined function
-            function: writeToDisk,
-          },
-        ],
-      },
-      { maxRecursiveToolRuns: 1 }
-    );
-    this.info("finished running task.");
+        temperature: 0.5,
+        top_p: 0.95,
+        max_tokens: 4096,
+        // response_format: {type} // DeepSeekR1 doesn't support it yet T.T
+      });
+
+      const reasoning = reasonResponse.choices[0].message.content as string;
+      const {
+        scratchpad_update,
+        is_complete,
+        next_plan,
+      }: z.infer<typeof ReasonResult> = JSON.parse(jsonrepair(reasoning));
+
+      if (is_complete) break; // break if reasoner decided it's time (it's time 🙏)
+
+      // update files with outputs
+      await Promise.all([
+        this.env.FILE_SYSTEM.put(CWD + "GOAL.md", goal), // should probably have the model expand on this first
+        this.env.FILE_SYSTEM.put(
+          CWD + "SCRATCHPAD.md",
+          `${scratchpad}\n${scratchpad_update}`
+        ),
+        this.env.FILE_SYSTEM.put(CWD + "PLAN.md", next_plan), // Placeholder
+      ]);
+    }
+
+    await cleanup();
   }
 
-  /*
-    SYSCALLS 🤡 
-  */
+  @callable()
+  async spawn(goal: string) {
+    const id = crypto.randomUUID().slice(0, 8);
+    const promise = this.autonomousProcess(id, goal);
+    PROCS.set(id, {
+      promise,
+      cwd: this.state.cwd,
+      aborted: false,
+      summary: goal.slice(0, 16),
+    });
+    return id;
+  }
 
   @callable()
   async readdir({ path }: { path: string }): Promise<FSEntry[]> {
-    const list = await this.env.FILE_SYSTEM.list({
-      prefix: this.toAbsolutePath(path, true),
-      delimiter: "/",
-    });
-
-    const entries: FSEntry[] = [
-      ...list.objects.map((obj) => ({
-        type: "file" as const,
-        path: obj.key,
-        size: obj.size,
-        ts: obj.uploaded,
-        owner: (obj.customMetadata?.owner as Owner) ?? Owner.User,
-      })),
-
-      ...list.delimitedPrefixes.map((pref) => ({
-        type: "dir" as const,
-        path: pref,
-      })),
-    ];
-    return entries.sort();
+    return fs.readdir({ path: toAbsolutePath(this.state.cwd, path, true) });
   }
 
   @callable()
   async readfile(path: string): Promise<ReadableStream | null> {
-    const obj = await this.env.FILE_SYSTEM.get(this.toAbsolutePath(path));
-    if (!obj || !obj.body) {
-      return null;
-    }
-    return obj.body;
+    return fs.readfile(toAbsolutePath(this.state.cwd, path), true);
   }
 
   @callable()
   async writefile(path: string, data: any) {
-    const absPath = this.toAbsolutePath(path);
-    const writer = openFileDescriptors.get(absPath)?.getWriter();
-    if (!writer) return null;
-
-    await writer.write(Uint8Array.from(Object.values(data)));
-    writer.releaseLock();
+    await fs.writefile(toAbsolutePath(this.state.cwd, path), data);
   }
 
   @callable()
-  async unlink(path: string) {
-    path = this.toAbsolutePath(path);
-    await this.env.FILE_SYSTEM.delete(path);
+  async unlink(paths: string[]) {
+    paths = paths.map((path) => toAbsolutePath(this.state.cwd, path));
+    await fs.unlink(paths);
   }
 
   @callable()
   async stat(path: string) {
-    const obj = await this.env.FILE_SYSTEM.head(this.toAbsolutePath(path));
-    if (!obj) {
-      return null;
-    }
-
-    const entry: FSEntry = {
-      path: obj.key,
-      type: "file",
-      size: obj.size,
-      ts: obj.uploaded,
-      owner: obj.customMetadata?.owner as Owner,
-    };
-    return entry;
+    return fs.stat(toAbsolutePath(this.state.cwd, path));
   }
+
   @callable()
   open(path: string, size: number, owner = "user") {
-    // get file desc
-    const { readable, writable } = new FixedLengthStream(size);
-    const absPath = this.toAbsolutePath(path);
-    openFileDescriptors.set(absPath, writable);
-    const uploadPromise = this.env.FILE_SYSTEM.put(absPath, readable, {
-      customMetadata: { owner },
-    });
-    this.ctx.waitUntil(
-      (async () => {
-        try {
-          await uploadPromise;
-        } catch (e: any) {
-          if (!(e instanceof Error)) {
-            e = new Error(e);
-          }
-          this.error(`-- DURING OPEN --${e.name}: ${e.message}`);
-        } finally {
-          openFileDescriptors.delete(path);
-        }
-      })()
-    );
+    this.ctx.waitUntil(fs.open(path, size, owner));
   }
 
   @callable()
   async close(path: string) {
-    // get file desc
-    const absPath = this.toAbsolutePath(path);
-    const stream = openFileDescriptors.get(absPath);
-    if (!stream) return;
-    await stream.close();
-    openFileDescriptors.delete(absPath);
+    await fs.close(path);
   }
 
   @callable()
   async chdir(path: string) {
-    let newCwd = this.toAbsolutePath(path, true);
+    let newCwd = toAbsolutePath(this.state.cwd, path, true);
     if (!newCwd.endsWith("/")) newCwd += "/";
     const dir = await this.readdir({ path: newCwd });
     if (dir.length > 0) {
@@ -422,20 +389,21 @@ ${content}
   }
 
   @callable()
-  async spawn() {
-    const task = await this.schedule("*/30 * * * *", "runs");
-    return task.id;
-  }
-
-  @callable()
   ps() {
-    return this.getSchedules();
+    const procs: any = [];
+    PROCS.forEach(({ cwd, summary }, procId) => {
+      procs.push({ procId, task: `${summary}...`, cwd });
+    });
+    return procs;
   }
 
   @callable()
-  async kill(taskId: string) {
-    if (!taskId) return;
-    return await this.cancelSchedule(taskId);
+  async kill(procId: string) {
+    const proc = PROCS.get(procId);
+    if (!proc || proc.aborted)
+      return "Process doesn't exist or has already been aborted";
+    PROCS.set(procId, { ...proc, aborted: true });
+    await proc.promise;
   }
 
   @callable()
@@ -467,24 +435,30 @@ export default {
       return Response.json({ valid: true }, { status: 200 });
     }
 
-    if (url.pathname.startsWith("/api/")) {
+    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/www/")) {
       const b64Key = readCookieValue(request, "auth");
       if (!b64Key) return new Response("missing auth", { status: 400 });
       const key = atob(b64Key);
       if (key != env.SECRET_KEY) return new Response("gtfo", { status: 401 });
+
+      if (url.pathname.startsWith("/www/")) {
+        const [_, path] = url.pathname.split("/www/");
+        const file = await env.FILE_SYSTEM.get(`/var/www/${path}`);
+        if (file && file.body) return new Response(file.body);
+        return new Response("not found", { status: 404 });
+      }
 
       const namedAgent = getAgentByName<Env, Quorra>(env.Quorra, "quorra");
       const namedResp = (await namedAgent).fetch(request);
       return namedResp;
     }
 
-    return env.ASSETS.fetch(request);
+    return Response.redirect(url.origin);
   },
 
   // Requires an Email Route to be set up to this worker.
   // I deployed the handler and that made it available in the CF Dashboard under Account > Zone > Email Routing.
   async email(message: ForwardableEmailMessage, env: Env) {
-    const quorra = await getAgentByName<Env, Quorra>(env.Quorra, "quorra");
     try {
       const email = await PostalMime.parse(message.raw);
       let conf: Partial<MailConf> = {};
@@ -493,16 +467,16 @@ export default {
         const content = await obj.text();
         conf = parse(content) as any;
       } else {
-        await quorra.warn(
-          `Processing email without a configuration file. Replies will only be logged, not delivered. Add it in ${MAIL_CONF_PATH}.`
+        await notifyUser(
+          `Processing email without a configuration file. Replies will only be logged, not delivered. Add it in ${MAIL_CONF_PATH}.`,
+          false
         );
       }
       const task = formatMailTask(conf, email);
-      await quorra.info(`task to run`, task);
 
       const deps = {
         email,
-        quorraAddr: conf.quorra_addr ?? 'quorrahasnoaddress@mail.com',
+        quorraAddr: conf.quorra_addr ?? "quorrahasnoaddress@mail.com",
         reject: (str: string) => message.setReject(str),
         sendReply: async (from: string, to: string, content: string) => {
           const { EmailMessage } = await import("cloudflare:email");
@@ -512,12 +486,31 @@ export default {
           await message.reply(replyMessage);
         },
       };
-      await quorra.automatedExecution({ task, deps, mode: Mode.Email });
+
+      // Model setup
+      const model = Model.GPT4o;
+      const provider = new OpenAI(getProviderConfig(model));
+      const messages: any = [
+        { role: "system", content: getModelSystemPrompt(model) },
+        { role: "user", content: task },
+      ];
+      const tools = getToolDefsByMode(Mode.Email);
+      const callFunction = generateCallFunction(Mode.Email, deps);
+
+      // Call model + exec tools
+      await execWithTools({
+        model,
+        provider,
+        messages,
+        tools,
+        callFunction,
+        options: { toolChoice: "required" },
+      });
     } catch (e: any) {
       if (!(e instanceof Error)) {
         e = new Error(e);
       }
-      await quorra.error(`-- DURING EMAIL --${e.name}: ${e.message}`);
+      await notifyUser(`[EMAIL ERROR] ${e.name}: ${e.message}`);
     }
   },
 } satisfies ExportedHandler<Env>;

@@ -4,16 +4,16 @@ import commandLineArgs, {
   import { CommandFn } from "../types";
   
   export const options: OptionDefinition[] = [
-    { name: "path", defaultOption: true },
+    { name: "paths", defaultOption: true, multiple: true },
   ];
   
   export const rm: CommandFn = async (argv, { agent, term }) => {
     if (!term || !agent) return;
-    let { path } = commandLineArgs(options, { argv });
-    if (!path) {
-      term.writeln("Usage: cd [path/to/folder]");
+    let { paths } = commandLineArgs(options, { argv });
+    if (!paths) {
+      term.writeln("Usage: rm [path/to/file]");
       return;
     }
-    await agent.call("unlink", [path]);
+    await agent.call("unlink", [paths]);
   };
   

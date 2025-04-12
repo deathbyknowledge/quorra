@@ -5,9 +5,8 @@ import XtermComponent from "./Xterm";
 import { Header } from "./Header";
 
 const Terminal: React.FC = () => {
-  const { animationLoading, setAnimationLoading, setFilePath, editingFile } =
+  const { animationLoading, setAnimationLoading, editingFile } =
     useAppContext();
-  console.log(setFilePath, editingFile);
 
   return (
     <div

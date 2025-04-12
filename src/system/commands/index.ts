@@ -44,9 +44,11 @@ export const commands: { [key: string]: CommandFn } = {
     await agent?.call("reboot", []);
     location.reload();
   },
-  spawn: async (_, { agent, term }) => {
-    const taskId = await agent?.call("scheduleTest", []);
-    term?.writeln(`Spawned ${taskId}.`);
+  spawn: async (args, { agent, term }) => {
+    // const taskId = await agent?.call("scheduleTest", []);
+    // term?.writeln(`Spawned ${taskId}.`);
+    if (!agent || !term) return;
+    await agent.call("spawn", [args.join(" ")]);
   },
   ps: async (_, { agent, term }) => {
     const tasks = await agent?.call("ps", []);
@@ -58,15 +60,31 @@ export const commands: { [key: string]: CommandFn } = {
       term.writeln("Usage: kill [procId]");
       return;
     }
-    const success = await agent.call("kill", [args[0]]);
-    term?.writeln(success ? "Done." : "Could not kill process.");
+    await agent.call("kill", [args[0]]);
+    term?.writeln(`Process ${args[0]} successfully aborted.`);
   },
   rm,
   ask,
   open: async (args, ctx) => {
-    ctx.setFilePath(args[0]);
+    if (!args.length) return;
+    let path = args[0];
+    if (!path.startsWith("/")) path = ctx.agentState?.cwd + path;
+
+    ctx.setFilePath(path);
+  },
+  view: async (args, ctx) => {
+    if (!args.length) return;
+    let path = args[0];
+    if (!path.startsWith("/")) path = ctx.agentState?.cwd + path;
+
+    if (!path.startsWith("/var/www/")) return;
+    window.open(location.origin + path.slice(4));
   },
   close: async (_, ctx) => {
     ctx.setFilePath(undefined as any);
   },
+  // search: async (args, { agent, term }) => {
+  //   if (!agent || !term) return;
+  //   await agent.call("deepsearch", [args.join(" ")]);
+  // },
 };

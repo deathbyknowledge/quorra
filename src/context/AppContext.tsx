@@ -61,7 +61,7 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (term && !key)
+    if (term && typeof key === 'undefined')
       term.write(`Authorization required.\n${prompt.current}`);
   }, [term, typeof key === undefined]);
 
