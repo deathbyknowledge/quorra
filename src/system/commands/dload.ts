@@ -29,16 +29,37 @@ export const dload: CommandFn = async (argv, { agent, term }) => {
 
     // create a FileSystemWritableFileStream to write to
     const writableStream = await newHandle.createWritable();
+    term.options.cursorBlink = false;
 
-    await agent.call("pipe", ['readfile', path], {
+    let progress = 0;
+    let size = entry.size!;
+    const barLength = 50;
+    const stepProgress = (progress: number) => {
+      const filled = Math.floor((progress / size) * barLength);
+      const empty = barLength - filled;
+      const bar = "█".repeat(filled) + "-".repeat(empty);
+      const percentage = Math.round((progress / size) * 100);
+
+      // Clear line and move cursor to start before writing
+      term.write("\x1B[2K\r[" + bar + "] " + percentage + "%");
+    };
+
+    stepProgress(progress);
+    await agent.call("pipe", ["readfile", path], {
       onChunk: async (chunk: any) => {
         const arr = Uint8Array.from(Object.values(chunk));
         await writableStream.write(arr);
+        progress += arr.byteLength;
+        stepProgress(progress);
       },
-      onError: () => term.writeln(""),
+      onDone: () => {
+      },
+      onError: (e) => term.writeln(`Error: ${e}`),
     });
     await writableStream.close();
-    term.writeln("Complete.");
+    term.writeln("\nSuccessfully dloaded.");
+    term.options.cursorBlink = true;
+    term.focus();
   } catch (e) {
     term.writeln(`dload error: ${e}`);
   }

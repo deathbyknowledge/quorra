@@ -21,12 +21,28 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
     const file = await fileHandle.getFile();
     const fstream = file.stream();
     const freader = fstream.getReader();
-    await agent.call<FSEntry>("open", [path, file.size]);
+    term.options.cursorBlink = false;
+
+    let size = file.size;
+    const barLength = 50;
+    const stepProgress = (progress: number) => {
+      const filled = Math.floor((progress / size) * barLength);
+      const empty = barLength - filled;
+      const bar = "█".repeat(filled) + "-".repeat(empty);
+      const percentage = Math.round((progress / size) * 100);
+
+      // Clear line and move cursor to start before writing
+      term.write("\x1B[2K\r[" + bar + "] " + percentage + "%");
+    };
+    await agent.call<FSEntry>("open", [path, size]);
     let total = 0;
+    stepProgress(total);
     while (true) {
       const { done, value } = await freader.read();
       if (done) {
         await agent.call<FSEntry>("close", [path]);
+        term.writeln("Succesfully uloaded.");
+        term.options.cursorBlink = true;
         break;
       }
       if (value) {
@@ -38,10 +54,12 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
             await agent.call<FSEntry>("writefile", [path, chunk]);
             total += chunkSize;
             offset += chunkSize;
+            stepProgress(total);
           } else {
             const chunk = value.slice(offset);
-            total += chunk.byteLength;
             await agent.call<FSEntry>("writefile", [path, chunk]);
+            total += chunk.byteLength;
+            stepProgress(total);
             break;
           }
         }
@@ -49,5 +67,6 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
     }
   } catch (e) {
     term.writeln(`uload error: ${e}`);
+    term.options.cursorBlink = true;
   }
 };
