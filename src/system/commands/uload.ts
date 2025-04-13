@@ -41,12 +41,13 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
       const { done, value } = await freader.read();
       if (done) {
         await agent.call<FSEntry>("close", [path]);
-        term.writeln("Succesfully uloaded.");
+        term.writeln("\nSuccesfully ploaded.");
         term.options.cursorBlink = true;
         break;
       }
       if (value) {
         const chunkSize = 1024 * 16; // 16KB
+        // TODO: invesetigatge -- DURING OPEN --TypeError: FixedLengthStream did not see all expected bytes before close().
         let offset = 0;
         while (true) {
           if (value.byteLength - offset > chunkSize) {

@@ -21,6 +21,9 @@ export const cat: CommandFn = async (argv, { agent, term }) => {
       term.write(arr);
     },
     onDone: () => term.writeln(""),
-    onError: (e) => term.writeln(`Error: ${e}`),
+    onError: (e) => {
+      term.writeln(`Error: ${e}`);
+      return;
+    },
   });
 };

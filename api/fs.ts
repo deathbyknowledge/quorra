@@ -92,7 +92,7 @@ async function readfile(
 ): Promise<ReadableStream | string | null> {
   const obj = await env.FILE_SYSTEM.get(path);
   if (!obj || !obj.body) {
-    return null;
+    throw new Error("File does not exist.");
   }
 
   return stream ? obj.body : obj.text();

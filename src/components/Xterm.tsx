@@ -111,7 +111,7 @@ const XtermComponent: React.FC = () => {
     <div
       ref={terminalRef}
       style={{
-        height: "100%",
+        height: "calc(100% - 20px)",
         minWidth: "100%",
         padding: "10px",
       }}

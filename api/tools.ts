@@ -191,7 +191,11 @@ const createReadDir = (cwd?: string) => {
 const HandleEmailParameters = z
   .object({
     shouldStore: z.boolean().describe("Whether this email needs to be stored."),
-    userNotification: z.string().describe("Message to send the user to notify them of the new email. Short and descriptive."),
+    userNotification: z
+      .string()
+      .describe(
+        "Message to send the user to notify them of the new email. Short and descriptive."
+      ),
     reply: z
       .string()
       .optional()
@@ -224,12 +228,20 @@ const createHandleEmail = (
     email.text ?? email.html ?? ""
   );
 
-  return async ({ shouldStore, reply, userNotification }: HandleEmailParams) => {
+  return async ({
+    shouldStore,
+    reply,
+    userNotification,
+  }: HandleEmailParams) => {
     // TODO: remove `true` whenever we're ready for prod
     if (shouldStore || true) {
       const now = new Date();
+      var formattedDate; // MMMM`
+      formattedDate = now.getFullYear() + '-' + ('0' + (now.getMonth()+1)).slice(-2) + '-' + ('0' + now.getDate()).slice(-2);
+      
+
       const id = crypto.randomUUID().slice(0, 8);
-      const path = `/var/mail/${now.getUTCFullYear()}${now.getUTCMonth()}${now.getUTCDate()}_${id}.txt`;
+      const path = `/var/mail/${formattedDate}/${id}.txt`;
       const formattedReply = reply
         ? `\n\n${formatEmailAsString(
             { address: quorraAddr, name: "Quorra" },

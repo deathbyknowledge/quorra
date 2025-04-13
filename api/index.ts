@@ -345,12 +345,14 @@ export class Quorra extends Agent<Env, State> {
 
   @callable()
   open(path: string, size: number, owner = "user") {
-    this.ctx.waitUntil(fs.open(path, size, owner));
+    this.ctx.waitUntil(
+      fs.open(toAbsolutePath(this.state.cwd, path), size, owner)
+    );
   }
 
   @callable()
   async close(path: string) {
-    await fs.close(path);
+    await fs.close(toAbsolutePath(this.state.cwd, path));
   }
 
   @callable()
@@ -367,24 +369,31 @@ export class Quorra extends Agent<Env, State> {
 
   @callable({ streaming: true })
   async pipe(stream: StreamingResponse, call: keyof this, ...args: unknown[]) {
-    if (!(call in this) || typeof this[call] !== "function") return;
-    const content = await this[call](...args);
-    if (!content || !(content instanceof ReadableStream)) return;
-
-    const reader = content.getReader();
-
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          stream.end();
-          break;
-        } else {
-          stream.send(value);
+      if (!(call in this) || typeof this[call] !== "function") return;
+      const content = await this[call](...args);
+      if (!content || !(content instanceof ReadableStream)) return;
+
+      const reader = content.getReader();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            stream.end();
+            break;
+          } else {
+            stream.send(value);
+          }
         }
+      } finally {
+        reader.releaseLock();
       }
-    } finally {
-      reader.releaseLock();
+    } catch (e: any) {
+      let utf8Encode = new TextEncoder();
+      const errBytes = utf8Encode.encode(e.toString());
+      stream.send(errBytes);
+      stream.end();
     }
   }
 

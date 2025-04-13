@@ -20,7 +20,6 @@
 body,
 html {
   margin: 0;
-  padding: 5px;
   position: relative;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans',
     'Droid Sans', 'Helvetica Neue', sans-serif;
@@ -42,6 +41,7 @@ html {
 
 /* Grid Background */
 body {
+  padding: 15px;
   background-color: var(--background);
   background-image: radial-gradient(circle, var(--grid-dot-color) var(--grid-dot-size), transparent var(--grid-dot-size));
   background-size: var(--grid-size) var(--grid-size);

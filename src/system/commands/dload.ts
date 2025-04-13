@@ -57,7 +57,7 @@ export const dload: CommandFn = async (argv, { agent, term }) => {
       onError: (e) => term.writeln(`Error: ${e}`),
     });
     await writableStream.close();
-    term.writeln("\nSuccessfully dloaded.");
+    term.writeln("\nSuccessfully downloaded.");
     term.options.cursorBlink = true;
     term.focus();
   } catch (e) {

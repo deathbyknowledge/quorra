@@ -10,9 +10,10 @@ const Terminal: React.FC = () => {
 
   return (
     <div
+      className="column"
       style={{
         width: `calc(${editingFile ? "45%" : "100%"} - 20px)`,
-        height: "90%",
+        height: "100%",
         display: "flex",
         flexDirection: "column",
         gap: "20px",
