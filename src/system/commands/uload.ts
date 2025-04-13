@@ -41,7 +41,7 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
       const { done, value } = await freader.read();
       if (done) {
         await agent.call<FSEntry>("close", [path]);
-        term.writeln("\nSuccesfully ploaded.");
+        term.writeln("\nSuccesfully uploaded.");
         term.options.cursorBlink = true;
         break;
       }
