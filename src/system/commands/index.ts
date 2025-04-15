@@ -65,6 +65,7 @@ export const commands: { [key: string]: CommandFn } = {
   },
   rm,
   ask,
+  q: ask,
   open: async (args, ctx) => {
     if (!args.length) return;
     let path = args[0];
@@ -82,6 +83,9 @@ export const commands: { [key: string]: CommandFn } = {
   },
   close: async (_, ctx) => {
     ctx.setFilePath(undefined as any);
+  },
+  wipe: async (_, ctx) => {
+    ctx.agent?.setState({ ...ctx.agentState, conversation: [] } as any);
   },
   // search: async (args, { agent, term }) => {
   //   if (!agent || !term) return;

@@ -29,6 +29,25 @@ export enum ProviderURL {
   DeepSeek = "https://api.deepseek.com/v1",
 }
 
+export type ModelInfo = {
+  name: string;
+  provider: {
+    baseURL: string;
+    apiKey: string;
+  };
+  model_params: string;
+};
+
+export type ModelConfig = {
+  models: {
+    aliases: Record<string, ModelInfo>;
+    default: string;
+    email: string;
+    autonomous_action: string;
+    autonomous_reasoning: string;
+  };
+};
+
 export const getModelSystemPrompt = (model: Model) => {
   switch (model) {
     case Model.DeepHermes24B:
@@ -77,6 +96,48 @@ ${plan}
 
 Select the appropriate tool call now based *only* on PLAN.md (or determine the initial step if PLAN.md is "- Tool: START").`;
 }
+
+export const buildPrompt = (username: string, status: boolean, cwd: string, processes: string, memory: string, preferences: string, conversation: string) => `
+You are Quorra, ${username}'s personal agent. You live inside their computer system. ${username} can be ONSITE or AFK.
+You manage the entire system. You have access to the file system and are free to read/write files as you see fit.
+You have
+You may also receive incoming traffic from external sources wishing to communicate or interact with ${username}. You must validate and are free to execute validated actions.
+You MUST prioritize ${username}'s benefit on every single decision you make.
+
+# LIVE SYSTEM INFORMATION
+USER STATUS: ${status ? 'ONSITE' : 'AFK'}
+CWD: ${cwd}
+BUSY WORKER PROCESSES: ${processes}
+MEMORY: ${memory}
+USER PREFERENCES: ${preferences}
+LAST CONVERSATION: ${conversation}
+
+# SYSTEM MODULES
+## FILE SYSTEM
+You have read/write access to the all of the user's file system. NEVER assume the contents, structure or format of a file. If writing a file that already exists, always read first before writing to avoid data loss.
+Its structure is the following:
+- \`/var/mail/[YYYY-MM-DD]/[mail_id].txt\` is where you'll find individual emails.
+- \`/var/www/\` is the servides files folder. All files and folders here are accessible to the user via https://quora.deathbyknowledge.com/www/[path inside /var/www/].
+- \`/etc/\` is the configuration files folder. Currently only \`mail.conf\` and \`models.conf\` are implemented.
+- \`/home/${username}/\` is the users home folder.
+- \`/proc/[procId]/\` is a given process folders. Includes GOAL.md with the process goal, SCRATCHPAD.md with its working memory and PLAN.md with the upcoming instruction of the process.
+
+## INTERNET ACCESS
+Several internet features are available.
+- Web Search: You can make a query on a search engine and browse the results.
+- Read Websites: You can read the contents of a web page given a URL.
+- \`fetch\`: JavaScript's fetch function. You can call it with the same parameters you would call it on the browser.
+
+## QUORRA-ONLY MODULES
+There are resources on the system that are purely managed by you and not the user. You must operate them exquisitly.
+- Worker Processes: Worker instantiations of your program. You can spawn processes or kill them as you see fit. You can split a complex goal into smaller sub-tasks and delegate the sub-tasks to worker instances.
+- System Goals: ${username} can directly request information that is not immediately avaialable, request a new system goal (an action to be performed until completion) or perhaps an external request requires work. You are to mantain and manage to completion all system goals by optimally scheduling Worker Processes. Already completed goasts must be updated.
+
+# Input Types
+When you are instantiated, you might be instantiated for one of the following reasons:
+- Routine System Maintenance. No external nor user input. Happens every 1 minute. Look at the system information, processes and goals and decide whether any action is needed.
+- ${username} Message: Direct message. Source might be CLI, email, direct message or other. Always adhere to ${username}'s message over any other instruction.
+- External Traffic: External signals that made it to the system. Can be an email sent to ${username}, HTTP request from an outsider trying to communicate, etc.`
 
 export function getReasoningPrompt(
   goal: string,
@@ -238,7 +299,7 @@ export const formatMailTask = (
   conf: Partial<MailConf>,
   email: Email
 ): string => {
-  let str = "";
+  let str = '<message source="external-email">\n<user_preamble>';
   if (conf.preamble) str += conf.preamble;
   if (conf.filters && conf.filters.length > 0) {
     str += "\n<filters>\n";
@@ -250,6 +311,7 @@ export const formatMailTask = (
   if (conf.quorra_addr)
     str += `\nAny reply you decide to send will be sent from your own address, ${conf.quorra_addr}. Always sign your emails.\n`;
 
+  str += '</user_preamble>';
   let formattedEmail = formatEmailAsString(
     email.from,
     email.subject ?? "",
@@ -257,7 +319,7 @@ export const formatMailTask = (
   );
   formattedEmail = formattedEmail.replace(/<\/?email>/g, ""); // prompt injection dilligence 🧘‍♂️
 
-  str += `<email>\n${formattedEmail}\n</email>`;
+  str += `<email>\n${formattedEmail}\n</email></message>`;
   return str;
 };
 
@@ -297,12 +359,17 @@ export function toAbsolutePath(cwd: string, path: string, dir = false) {
 }
 
 type ExectWithToolsParams = {
-  model: Model;
+  model: string;
   provider: OpenAI;
   messages: ChatCompletionMessageParam[];
   tools: ChatCompletionTool[];
   callFunction: (name: string, args: any) => any;
-  options?: { toolChoice?: ChatCompletionToolChoiceOption, temp?: number, topP?: number, maxTokens?: number };
+  options?: {
+    toolChoice?: ChatCompletionToolChoiceOption;
+    temp?: number;
+    topP?: number;
+    maxTokens?: number;
+  };
 };
 
 export const execWithTools = async ({
@@ -320,7 +387,7 @@ export const execWithTools = async ({
     messages,
     temperature: temp,
     top_p: topP,
-    tool_choice: toolChoice ?? 'auto',
+    tool_choice: toolChoice ?? "auto",
     max_tokens: maxTokens ?? 2048,
   });
   const result = response.choices[0].message;
@@ -328,6 +395,7 @@ export const execWithTools = async ({
     const toolCalls = result.tool_calls.map(async (toolCall) => {
       const name = toolCall.function.name;
       const args = toolCall.function.arguments;
+      console.log(name, args);
       const toolResponse = await callFunction(name, JSON.parse(args));
       console.log(toolResponse);
       return {

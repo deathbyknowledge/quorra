@@ -22,3 +22,4 @@ You communicate informally and in succinct responses that feel just like another
 You will always be communicating with ${username} unless otherwise specified.`;
 
 export const MAIL_CONF_PATH = '/etc/mail.conf';
+export const MODEL_CONF_PATH = '/etc/models.conf';

@@ -2,9 +2,14 @@ import { zodFunction } from "openai/helpers/zod";
 import { z } from "zod";
 import { createMimeMessage } from "mimetext";
 import { Email } from "postal-mime";
-import { formatEmailAsString, notifyUser, toAbsolutePath } from "./utils";
+import {
+  formatEmailAsString,
+  notifyUser,
+  toAbsolutePath,
+} from "./utils";
 import { env } from "cloudflare:workers";
 import { fs } from "./fs";
+import { parse } from "toml";
 
 /*
     EMAIL TOOLS
@@ -23,6 +28,21 @@ enum SysTools {
 enum SearchTools {
   WebSearch = "webSearch",
   ReadWebsites = "readWebsites",
+}
+export async function readAsConfig<T>(path: string): Promise<T> {
+  const obj = await env.FILE_SYSTEM.get(path);
+  if (!obj || !obj.body) {
+    throw new Error("Quorra configuration file not found.");
+  }
+  const content = await obj.text();
+  return parse(content) as T;
+}
+export async function readUserPreferences(username:string): Promise<string> {
+  const obj = await env.FILE_SYSTEM.get(`/home/${username}/.quorra`);
+  if (!obj || !obj.body) {
+    throw new Error("Quorra configuration file not found.");
+  }
+  return await obj.text();
 }
 
 const WriteFileParameters = z
@@ -182,7 +202,7 @@ const createWebSearch = () => {
 
 const createReadDir = (cwd?: string) => {
   return async ({ path }: ReadDirParams) => {
-    path = toAbsolutePath(cwd ?? "/tmp/", path);
+    path = toAbsolutePath(cwd ?? "/tmp/", path, true);
     return await fs.readdir({ path });
   };
 };
@@ -237,8 +257,12 @@ const createHandleEmail = (
     if (shouldStore || true) {
       const now = new Date();
       var formattedDate; // MMMM`
-      formattedDate = now.getFullYear() + '-' + ('0' + (now.getMonth()+1)).slice(-2) + '-' + ('0' + now.getDate()).slice(-2);
-      
+      formattedDate =
+        now.getFullYear() +
+        "-" +
+        ("0" + (now.getMonth() + 1)).slice(-2) +
+        "-" +
+        ("0" + now.getDate()).slice(-2);
 
       const id = crypto.randomUUID().slice(0, 8);
       const path = `/var/mail/${formattedDate}/${id}.txt`;
@@ -268,8 +292,8 @@ const createHandleEmail = (
       });
 
       await sendReply(quorraAddr, email.from.address!, msg.asRaw());
-      await notifyUser(userNotification);
     }
+    await notifyUser(userNotification);
   };
 };
 

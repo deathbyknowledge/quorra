@@ -5,28 +5,35 @@ import {
   StreamingResponse,
 } from "agents";
 import { OpenAI } from "openai";
-import {
-  execWithTools,
-  formatMailTask,
-  getActionPrompt,
-  getModelSystemPrompt,
-  getProviderConfig,
-  getReasoningPrompt,
-  MailConf,
-  Model,
-  notifyUser,
-  toAbsolutePath,
-} from "./utils";
 import PostalMime from "postal-mime";
-import { generateCallFunction, getToolDefsByMode, Mode } from "./tools";
-import { parse } from "toml";
-import { MAIL_CONF_PATH } from "./constants";
+import {
+  generateCallFunction,
+  getToolDefsByMode,
+  Mode,
+  readAsConfig,
+  readUserPreferences,
+} from "./tools";
+import { MAIL_CONF_PATH, MODEL_CONF_PATH } from "./constants";
 import { z } from "zod";
 import { jsonrepair } from "jsonrepair";
 import { fs } from "./fs";
+import {
+  buildPrompt,
+  execWithTools,
+  formatMailTask,
+  getActionPrompt,
+  getReasoningPrompt,
+  MailConf,
+  Model,
+  ModelConfig,
+  notifyUser,
+  toAbsolutePath,
+} from "./utils";
+import {zodFunction} from "openai/helpers/zod.mjs";
 
 type State = {
   cwd: string;
+  conversation: { from: string; content: string }[];
 };
 
 export enum Owner {
@@ -35,11 +42,11 @@ export enum Owner {
   Quorra = "quorra",
 }
 
-const INITIAL_STATE: State = { cwd: "/" };
+const INITIAL_STATE: State = { cwd: "/", conversation: [] };
 
 const PROCS = new Map<
   string,
-  { promise: Promise<void>; aborted: boolean; cwd: string; summary: string }
+  { promise: Promise<void>; aborted: boolean; cwd: string; task: string }
 >();
 
 export class Quorra extends Agent<Env, State> {
@@ -75,35 +82,81 @@ export class Quorra extends Agent<Env, State> {
   @callable()
   async ask({
     ask,
-    model = Model.GPT4o,
     stream = false,
-    maxSequentialCalls = 3,
+    maxSequentialCalls = 15,
   }: {
     ask: string;
-    model?: Model;
     stream?: boolean;
     maxSequentialCalls?: number;
   }) {
-    const openai = new OpenAI(getProviderConfig(model));
+    const modelsConf = await readAsConfig<ModelConfig>(MODEL_CONF_PATH).catch(
+      (e) => e.toString()
+    );
+    const preferences = await readUserPreferences("sam");
+    const model = modelsConf?.models?.aliases?.[modelsConf?.models?.default];
+    if (!model)
+      notifyUser(
+        `Fix your model config. [models].email not set or not found in ${MODEL_CONF_PATH}.`
+      );
+    // const model = Model.GPT4o;
+    const provider = new OpenAI(model.provider);
+    // const openai = new OpenAI(getProviderConfig(model));
+    let processes = [];
+    for (const [id, { cwd, task }] of PROCS.entries()) {
+      processes.push({ id, cwd, task });
+    }
+    this.setState({
+      ...this.state,
+      conversation: [...this.state.conversation, { from: "sam", content: ask }],
+    });
     const messages: any = [
       {
         role: "system",
-        content: getModelSystemPrompt(model),
+        // content: getModelSystemPrompt(model.name as Model),
+        content: buildPrompt(
+          "sam",
+          true,
+          this.state.cwd,
+          JSON.stringify(processes),
+          "Empty",
+          preferences,
+          !this.state.conversation
+            ? ""
+            : JSON.stringify(this.state.conversation)
+        ),
       },
       {
         role: "user",
-        content: ask,
+        content: `<message source="cli">${ask}</message>`,
       },
     ];
     const tools = getToolDefsByMode(Mode.AllSyscalls);
     const callFunction = generateCallFunction(Mode.AllSyscalls, {
       cwd: this.state.cwd,
     });
+    const SpawnWorker = z
+      .object({
+        task: z
+          .string()
+          .describe(
+            "The task this worker process must accomplish (e.g. research <topic> and write the results in results.txt)"
+          ),
+      })
+      .required({ task: true });
+
+    // type SpawnWorkerParams = z.infer<typeof SpawnWorker>;
+
+    const spawnWorkerDef = zodFunction({
+      name: "spawnWorker",
+      parameters: SpawnWorker,
+      description:
+        "Spawns an autonomous worker process. Use when a task can be completed quickly or to divide a compelx task into sub-tasks executed by workers. Returns process id.",
+    });
 
     if (stream) {
       // return a ReadableStream including only output text
-      const stream = await openai.chat.completions.create({
-        model,
+      const stream = await provider.chat.completions.create({
+        model: model.name,
         tools,
         messages,
         stream: true,
@@ -122,14 +175,29 @@ export class Quorra extends Agent<Env, State> {
     } else {
       let i = 0;
       while (true) {
+        const call = async (name: string, args: any) => {
+          if (name ===  'spawnWorker') {
+            const {task} = args;
+            return await this.spawn(task);
+          } else {
+            return await callFunction(name, args);
+          }
+        }
         const res = await execWithTools({
-          model,
-          provider: openai,
+          model: model.name as Model,
+          provider,
           messages,
-          tools,
-          callFunction,
+          tools: [...tools, spawnWorkerDef],
+          callFunction: call,
         });
         if (typeof res === "string") {
+          this.setState({
+            ...this.state,
+            conversation: [
+              ...this.state.conversation,
+              { from: "quorra", content: res },
+            ],
+          });
           return res; // model responded with text
         } else if (Array.isArray(res)) {
           const tool_calls = res.map((result) => result.call);
@@ -143,6 +211,19 @@ export class Quorra extends Agent<Env, State> {
               tool_call_id: result.call.id,
               content: JSON.stringify(result.result),
             };
+            this.setState({
+              ...this.state,
+              conversation: [
+                ...this.state.conversation,
+                {
+                  from: "quorra (module)",
+                  content: JSON.stringify({
+                    ...result.call.function,
+                    result: "[OMITED]",
+                  }),
+                },
+              ],
+            });
             messages.push(msg);
           });
         }
@@ -166,11 +247,23 @@ export class Quorra extends Agent<Env, State> {
     ]);
 
     // Model setup
+    const modelsConf = (await readAsConfig<Partial<ModelConfig>>(
+      MODEL_CONF_PATH
+    ).catch<string>((e) => e.toString())) as Partial<ModelConfig>;
+    const actionModel =
+      modelsConf?.models?.aliases?.[modelsConf?.models?.autonomous_action];
+    const reasonModel =
+      modelsConf?.models?.aliases?.[modelsConf?.models?.autonomous_reasoning];
+    if (!actionModel || !reasonModel) {
+      notifyUser(
+        `Fix your model config. [models].email not set or not found in ${MODEL_CONF_PATH}.`
+      );
+      return;
+    }
+    // const model = Model.GPT4o;
+    const actionProvider = new OpenAI(actionModel.provider);
+    const reasonProvider = new OpenAI(reasonModel.provider);
     const tools = getToolDefsByMode(Mode.AllSyscalls);
-    const actionModel = Model.DeepSeekV3;
-    const actionProvider = new OpenAI(getProviderConfig(actionModel));
-    const reasonModel = Model.DeepSeekR1;
-    const reasonProvider = new OpenAI(getProviderConfig(reasonModel));
     const callFunction = generateCallFunction(Mode.AllSyscalls, {
       cwd: this.state.cwd, // tool calls will use the CWD from the user, not the task.
     });
@@ -208,7 +301,7 @@ export class Quorra extends Agent<Env, State> {
       const [goal, scratchpad, plan] = files as string[];
       // STEP 1: ACTION AGENT EXECUTES TOOLS.
       const execResult = await execWithTools({
-        model: actionModel,
+        model: actionModel.name,
         provider: actionProvider,
         messages: [
           {
@@ -262,7 +355,7 @@ export class Quorra extends Agent<Env, State> {
 
       // STEP 2: REASON AGENT
       const reasonResponse = await reasonProvider.chat.completions.create({
-        model: reasonModel,
+        model: reasonModel.name,
         messages: [
           {
             role: "user",
@@ -312,7 +405,7 @@ export class Quorra extends Agent<Env, State> {
       promise,
       cwd: this.state.cwd,
       aborted: false,
-      summary: goal.slice(0, 16),
+      task: goal,
     });
     return id;
   }
@@ -400,8 +493,8 @@ export class Quorra extends Agent<Env, State> {
   @callable()
   ps() {
     const procs: any = [];
-    PROCS.forEach(({ cwd, summary }, procId) => {
-      procs.push({ procId, task: `${summary}...`, cwd });
+    PROCS.forEach(({ cwd, task }, procId) => {
+      procs.push({ procId, task, cwd });
     });
     return procs;
   }
@@ -467,20 +560,15 @@ export default {
 
   // Requires an Email Route to be set up to this worker.
   // I deployed the handler and that made it available in the CF Dashboard under Account > Zone > Email Routing.
-  async email(message: ForwardableEmailMessage, env: Env) {
+  async email(message: ForwardableEmailMessage) {
     try {
       const email = await PostalMime.parse(message.raw);
-      let conf: Partial<MailConf> = {};
-      const obj = await env.FILE_SYSTEM.get(MAIL_CONF_PATH);
-      if (obj && obj.body) {
-        const content = await obj.text();
-        conf = parse(content) as any;
-      } else {
+      let conf = await readAsConfig<Partial<MailConf>>(MAIL_CONF_PATH);
+      if (!conf)
         await notifyUser(
           `Processing email without a configuration file. Replies will only be logged, not delivered. Add it in ${MAIL_CONF_PATH}.`,
           false
         );
-      }
       const task = formatMailTask(conf, email);
 
       const deps = {
@@ -497,10 +585,33 @@ export default {
       };
 
       // Model setup
-      const model = Model.GPT4o;
-      const provider = new OpenAI(getProviderConfig(model));
+      const modelsConf = await readAsConfig<Partial<ModelConfig>>(
+        MODEL_CONF_PATH
+      ).catch((e) => e.toString());
+      const preferences = await readUserPreferences("sam");
+      const model = modelsConf?.models?.aliases?.[modelsConf?.models?.email];
+      if (!model)
+        notifyUser(
+          `Fix your model config. [models].email not set or not found in ${MODEL_CONF_PATH}.`
+        );
+      let processes = [];
+      for (const [id, { cwd, task }] of PROCS.entries()) {
+        processes.push({ id, cwd, task });
+      }
+      const provider = new OpenAI(model.provider);
       const messages: any = [
-        { role: "system", content: getModelSystemPrompt(model) },
+        {
+          role: "system",
+          content: buildPrompt(
+            "sam",
+            true,
+            "/tmp/",
+            JSON.stringify(processes),
+            "Empty",
+            preferences,
+            "None"
+          ),
+        },
         { role: "user", content: task },
       ];
       const tools = getToolDefsByMode(Mode.Email);
@@ -508,7 +619,7 @@ export default {
 
       // Call model + exec tools
       await execWithTools({
-        model,
+        model: model.name as Model,
         provider,
         messages,
         tools,
