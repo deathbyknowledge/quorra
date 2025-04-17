@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { FSEntry, Owner } from ".";
+import { type FSEntry, Owner } from ".";
 // import { EventType, publishToBus } from './bus';
 
 const openFileDescriptors = new Map<string, WritableStream>();

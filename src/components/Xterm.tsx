@@ -6,7 +6,7 @@ import { commands, authCommands } from "../system/commands";
 import { useAuthContext } from "../context/AuthContext";
 
 const XtermComponent: React.FC = () => {
-  const terminalRef = useRef(null);
+  const terminalRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<any>(null);
   const inputBuffer = useRef("");
   const [history, setHistory] = useState<string[]>([]); // Command history
@@ -16,27 +16,36 @@ const XtermComponent: React.FC = () => {
   const term = ctx.term;
 
   useEffect(() => {
-    if (!term) return;
+    if (!term || !terminalRef.current) return;
 
     termRef.current = term;
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
 
-    if (terminalRef.current) {
+    // Check if terminal is already opened to avoid re-opening
+    if (!term.element) {
       term.open(terminalRef.current);
-      term.focus();
-      fitAddon.fit();
-
-      const handleResize = () => fitAddon.fit();
-      window.addEventListener("resize", handleResize);
-
-      (terminalRef.current as any).focus();
-
-      return () => {
-        window.removeEventListener("resize", handleResize);
-        term.dispose();
-      };
+      // Use requestAnimationFrame to ensure canvas is ready before fitting
+      requestAnimationFrame(() => {
+        fitAddon.fit();
+        term.focus();
+        (terminalRef.current as any)?.focus();
+      });
+    } else {
+      // If already opened, just fit and focus
+      requestAnimationFrame(() => {
+        fitAddon.fit();
+        term.focus();
+        (terminalRef.current as any)?.focus();
+      });
     }
+
+    const handleResize = () => fitAddon.fit();
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
   }, [term]);
 
   useEffect(() => {

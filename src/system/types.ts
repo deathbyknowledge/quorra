@@ -1,6 +1,9 @@
-import {AppContext} from "../context/AppContext";
+import { type AppContext } from "../context/AppContext";
 
-export type CommandFn = (args: string[], ctx: AppContext) => void | Promise<void>;
+export type CommandFn = (
+  args: string[],
+  ctx: AppContext
+) => void | Promise<void>;
 
 export type FSEntry = {
   type: "file" | "dir";

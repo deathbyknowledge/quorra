@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { readAsConfig } from "./tools";
-import { ModelConfig, notifyUser } from "./utils";
+import { type ModelConfig, notifyUser } from "./utils";
 import { MODEL_CONF_PATH } from "./constants";
 import OpenAI from "openai";
 export enum EventType {

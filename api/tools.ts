@@ -1,7 +1,7 @@
 import { zodFunction } from "openai/helpers/zod";
 import { z } from "zod";
 import { createMimeMessage } from "mimetext";
-import { Email } from "postal-mime";
+import { type Email } from "postal-mime";
 import {
   formatEmailAsString,
   notifyUser,
@@ -183,7 +183,7 @@ const createWebSearch = () => {
     try {
       const response = await fetch(
         "https://google.serper.dev/search",
-        requestOptions
+        requestOptions as any
       );
       const { searchParameters, knowledgeGraph, organic, topStories }: any =
         await response.json();

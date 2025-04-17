@@ -31,11 +31,11 @@ const App: React.FC = () => {
   return (
     <AuthContextProvider>
       <ContextProvider>
-        <Editor />
-        <Terminal />
-        <EventFeed />
-      </ContextProvider>
-    </AuthContextProvider>
+          <Editor />
+          <Terminal />
+          <EventFeed />
+        </ContextProvider>
+      </AuthContextProvider>
   );
 };
 

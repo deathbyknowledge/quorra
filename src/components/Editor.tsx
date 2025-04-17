@@ -1,9 +1,9 @@
-import { Monaco } from "@monaco-editor/react";
+import { type Monaco } from "@monaco-editor/react";
 import MonacoEditor from "@monaco-editor/react";
 import React, { useEffect, useRef, useState } from "react";
 import LoadingBorderWrapper from "./LoadingBorderWrapper";
 import { useAppContext } from "../context/AppContext";
-import { FSEntry } from "../system/types";
+import { type FSEntry } from "../system/types";
 import "../App.css";
 import { Header } from "./Header";
 

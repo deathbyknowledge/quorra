@@ -1,6 +1,6 @@
-import { Address, Email } from "postal-mime";
+import type { Address, Email } from "postal-mime";
 import OpenAI from "openai";
-import {
+import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
   ChatCompletionToolChoiceOption,
@@ -57,7 +57,15 @@ ${plan}
 Select the appropriate tool call now based *only* on PLAN.md (or determine the initial step if PLAN.md is "- Tool: START").`;
 }
 
-export const buildPrompt = (username: string, status: boolean, cwd: string, processes: string, memory: string, preferences: string, conversation: string) => `
+export const buildPrompt = (
+  username: string,
+  status: boolean,
+  cwd: string,
+  processes: string,
+  memory: string,
+  preferences: string,
+  conversation: string
+) => `
 You are Quorra, ${username}'s personal agent. You live inside their computer system. ${username} can be ONSITE or AFK.
 You manage the entire system. You have access to the file system and are free to read/write files as you see fit.
 You have
@@ -65,7 +73,7 @@ You may also receive incoming traffic from external sources wishing to communica
 You MUST prioritize ${username}'s benefit on every single decision you make.
 
 # LIVE SYSTEM INFORMATION
-USER STATUS: ${status ? 'ONSITE' : 'AFK'}
+USER STATUS: ${status ? "ONSITE" : "AFK"}
 CWD: ${cwd}
 BUSY WORKER PROCESSES: ${processes}
 MEMORY: ${memory}
@@ -97,7 +105,7 @@ There are resources on the system that are purely managed by you and not the use
 When you are instantiated, you might be instantiated for one of the following reasons:
 - Routine System Maintenance. No external nor user input. Happens every 1 minute. Look at the system information, processes and goals and decide whether any action is needed.
 - ${username} Message: Direct message. Source might be CLI, email, direct message or other. Always adhere to ${username}'s message over any other instruction.
-- External Traffic: External signals that made it to the system. Can be an email sent to ${username}, HTTP request from an outsider trying to communicate, etc.`
+- External Traffic: External signals that made it to the system. Can be an email sent to ${username}, HTTP request from an outsider trying to communicate, etc.`;
 
 export function getReasoningPrompt(
   goal: string,
@@ -247,7 +255,7 @@ export const formatMailTask = (
   if (conf.quorra_addr)
     str += `\nAny reply you decide to send will be sent from your own address, ${conf.quorra_addr}. Always sign your emails.\n`;
 
-  str += '</user_preamble>';
+  str += "</user_preamble>";
   let formattedEmail = formatEmailAsString(
     email.from,
     email.subject ?? "",

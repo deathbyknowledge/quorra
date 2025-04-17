@@ -23,13 +23,13 @@ import {
   formatMailTask,
   getActionPrompt,
   getReasoningPrompt,
-  MailConf,
-  ModelConfig,
+  type MailConf,
+  type ModelConfig,
   notifyUser,
   toAbsolutePath,
 } from "./utils";
 import { zodFunction } from "openai/helpers/zod.mjs";
-import { Event, EventType, publishToBus, summary } from "./bus";
+import { type Event, EventType, publishToBus, summary } from "./bus";
 
 type State = {
   cwd: string;

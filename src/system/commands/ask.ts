@@ -1,7 +1,7 @@
 import commandLineArgs, {
-  OptionDefinition,
+type   OptionDefinition,
 } from "../../libs/command-line-args";
-import { CommandFn } from "../types";
+import type { CommandFn } from "../types";
 
 const options: OptionDefinition[] = [
   { name: "prompt", defaultOption: true, multiple: true },

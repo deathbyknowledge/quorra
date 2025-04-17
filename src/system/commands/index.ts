@@ -1,7 +1,7 @@
-import { Terminal } from "@xterm/xterm";
+import type { Terminal } from "@xterm/xterm";
 import { uload } from "./uload";
 import { dload } from "./dload";
-import { CommandFn } from "../types";
+import { type CommandFn } from "../types";
 import { file } from "./file";
 import { cd } from "./cd";
 import { ls } from "./ls";

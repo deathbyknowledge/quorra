@@ -129,9 +129,9 @@ function KeyRow({
         marginBottom: 10,
       }}
     >
-      {keys.map((k) => (
+      {keys.map((k, i) => (
         <Key
-          key={k}
+          key={`${k}-${i}`}
           label={k}
           specialKeys={specialKeys}
           active={activeKeys.has(k)}

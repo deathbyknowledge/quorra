@@ -1,7 +1,7 @@
 import commandLineArgs, {
-  OptionDefinition,
+  type OptionDefinition,
 } from "../../libs/command-line-args";
-import { CommandFn, FSEntry } from "../types";
+import type { CommandFn, FSEntry } from "../types";
 
 export const options: OptionDefinition[] = [
   { name: "path", defaultOption: true },
@@ -38,6 +38,7 @@ const parseName = (entry: FSEntry) => {
 
 export const ls: CommandFn = async (argv, { agent, term, agentState }) => {
   if (!term || !agent) return;
+  console.log('woof');
   let { path, all, long } = commandLineArgs(options, { argv });
   if (!path) {
     path = agentState?.cwd ?? "/";
@@ -46,30 +47,33 @@ export const ls: CommandFn = async (argv, { agent, term, agentState }) => {
 
   const dirEntries = await agent.call<FSEntry[]>("readdir", [{ path }]);
   const colWidths = {
-    owner: Math.max(...dirEntries.map((e) => parseOwner(e.owner ?? 'user').length)),
-    size: Math.max(...dirEntries.map((e) => String(e.size ?? '-').length)),
-    ts: Math.max(...dirEntries.map((e) => (e.ts ? formatTimestamp(e.ts) : '-').length)),
+    owner: Math.max(
+      ...dirEntries.map((e) => parseOwner(e.owner ?? "user").length)
+    ),
+    size: Math.max(...dirEntries.map((e) => String(e.size ?? "-").length)),
+    ts: Math.max(
+      ...dirEntries.map((e) => (e.ts ? formatTimestamp(e.ts) : "-").length)
+    ),
     name: Math.max(...dirEntries.map((e) => parseName(e).length)),
   };
   if (long) {
     dirEntries.forEach((entry: FSEntry) => {
       const name = parseName(entry);
-      const owner = parseOwner(entry.owner ?? 'user');
+      const owner = parseOwner(entry.owner ?? "user");
       if (!all && name.startsWith(".")) return;
-      const formattedTime = (entry.ts ? formatTimestamp(entry.ts) : '-');
+      const formattedTime = entry.ts ? formatTimestamp(entry.ts) : "-";
       const line = [
         owner.padEnd(colWidths.owner, " "),
-        String(entry.size ?? '-').padStart(colWidths.size, " "),
+        String(entry.size ?? "-").padStart(colWidths.size, " "),
         formattedTime.padEnd(colWidths.ts, " "),
-        (entry.type === "file" ? name : `\x1b[1m${name}\x1b[0m`),
+        entry.type === "file" ? name : `\x1b[1m${name}\x1b[0m`,
       ].join("  ");
       term.writeln(line);
     });
   } else {
     let str = "";
     dirEntries.forEach((entry: FSEntry) => {
-      const name =
-        parseName(entry)
+      const name = parseName(entry);
       if (!all && name.startsWith(".")) return;
       str += (entry.type === "file" ? name : `\x1b[1m${name}\x1b[0m`) + "\t";
     });

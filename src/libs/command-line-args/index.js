@@ -1,9 +1,9 @@
 // Adapted from https://github.com/75lb/command-line-args to run on the browser.
 "use strict";
 
-var arrayify = require("array-back");
-var findReplace = require("find-replace");
-var t = require("typical");
+import arrayify from "array-back";
+import findReplace from "find-replace";
+import * as t from "typical";
 // var camelCase = require("lodash.camelcase");
 
 /**
@@ -1022,4 +1022,4 @@ function commandLineArgs(optionDefinitions, options) {
   });
 }
 
-module.exports = commandLineArgs;
+export default commandLineArgs;

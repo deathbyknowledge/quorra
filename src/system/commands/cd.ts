@@ -1,8 +1,8 @@
 import commandLineArgs, {
-  OptionDefinition,
+  type OptionDefinition,
 } from "../../libs/command-line-args";
 import { formatPrompt } from "../constants";
-import { CommandFn } from "../types";
+import { type CommandFn } from "../types";
 
 export const options: OptionDefinition[] = [
   { name: "path", defaultOption: true },

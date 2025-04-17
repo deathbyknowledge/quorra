@@ -1,4 +1,4 @@
-import React, { PropsWithChildren, useEffect, useRef, useState, useMemo } from "react";
+import React, {type PropsWithChildren, useEffect, useRef, useState, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid"; // Install with: npm install uuid
 
 const LoadingBorderWrapper: React.FC<

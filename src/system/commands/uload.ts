@@ -1,7 +1,7 @@
 import commandLineArgs, {
-  OptionDefinition,
+  type OptionDefinition,
 } from "../../libs/command-line-args";
-import { CommandFn, FSEntry } from "../types";
+import { type CommandFn, type FSEntry } from "../types";
 
 export const options: OptionDefinition[] = [
   { name: "path", defaultOption: true },
@@ -17,6 +17,7 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
 
   // Open file picker and destructure the result the first handle
   try {
+    //@ts-ignore
     const [fileHandle] = await window.showOpenFilePicker();
     const file = await fileHandle.getFile();
     const fstream = file.stream();

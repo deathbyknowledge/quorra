@@ -1,7 +1,7 @@
 import commandLineArgs, {
-  OptionDefinition,
+  type OptionDefinition,
 } from "../../libs/command-line-args";
-import { CommandFn, FSEntry } from "../types";
+import type { CommandFn, FSEntry } from "../types";
 
 export const options: OptionDefinition[] = [
   { name: "path", defaultOption: true },
@@ -22,6 +22,7 @@ export const dload: CommandFn = async (argv, { agent, term }) => {
   const slugs = entry.path.split("/");
   const fileName = slugs[slugs.length - 1];
   try {
+    //@ts-ignore
     const newHandle = await window.showSaveFilePicker({
       suggestedName: fileName,
       startIn: "downloads",
