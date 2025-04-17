@@ -23,6 +23,7 @@ export type AppContext = {
   setFilePath: (path: string) => void;
   term?: Terminal;
   prompt: MutableRefObject<string>;
+  events: any[];
 };
 
 const AppContext = createContext<AppContext>({
@@ -31,6 +32,7 @@ const AppContext = createContext<AppContext>({
   setFilePath: () => {},
   established: false,
   prompt: {} as MutableRefObject<string>,
+  events: [],
 });
 
 export type AgentState = {
@@ -42,6 +44,7 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const [agentState, _setAgentState] = useState<AgentState | undefined>();
   const [established, setEstablished] = useState(false);
   const [filePath, setFilePath] = useState<string | undefined>();
+  const [events, setEvents] = useState<any[]>([]);
   const { key } = useAuthContext();
   const prompt = useRef("$ ");
   const term = useMemo(() => {
@@ -61,7 +64,7 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (term && typeof key === 'undefined')
+    if (term && typeof key === "undefined")
       term.write(`Authorization required.\n${prompt.current}`);
   }, [term, typeof key === undefined]);
 
@@ -83,7 +86,14 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
       prompt.current = formatPrompt(state.cwd);
     },
     onMessage: (msg) => {
-      alert(`[SYSTEM] ${msg.data}`);
+      try {
+        const { type, data } = JSON.parse(msg.data);
+        if (type === "system-event") {
+          setEvents((prev) => [...prev, data]);
+        }
+      } catch (e) {
+        console.error(e);
+      }
     },
     onClose: () => setEstablished(false),
   });
@@ -100,6 +110,7 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
         editingFile: filePath,
         term,
         prompt,
+        events,
       }}
     >
       {children}

@@ -3,6 +3,7 @@ import { useAppContext } from "../context/AppContext";
 import LoadingBorderWrapper from "./LoadingBorderWrapper";
 import XtermComponent from "./Xterm";
 import { Header } from "./Header";
+import Keyboard from "./Keyboard";
 
 const Terminal: React.FC = () => {
   const { animationLoading, setAnimationLoading, editingFile } =
@@ -47,6 +48,9 @@ const Terminal: React.FC = () => {
           </LoadingBorderWrapper>
         </div>
       </LoadingBorderWrapper>
+      <div style={{display: "flex", justifyContent: "center"}}>
+      <Keyboard />
+      </div>
     </div>
   );
 };

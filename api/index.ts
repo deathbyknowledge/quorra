@@ -528,14 +528,24 @@ export class Quorra extends Agent<Env, State> {
   }
 
   userStatus() {
-    const conns =  Array.from(this.getConnections());
-    conns.length ? 'ONLINE' : 'OFFLINE';
+    const conns = Array.from(this.getConnections());
+    conns.length ? "ONLINE" : "OFFLINE";
   }
 
   async orchestrate(event: Event) {
     switch (event.type) {
       case EventType.Debug: {
-        this.broadcast(event.data);
+        this.broadcast(
+          JSON.stringify({
+            type: "system-event",
+            data: {
+              ts: Date.now(),
+              level: "info",
+              source: "quorra",
+              message: event.data,
+            },
+          })
+        );
         break;
       }
       case EventType.FileCreated: {

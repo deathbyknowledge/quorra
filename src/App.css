@@ -9,6 +9,7 @@
   --color135: #768b7d;
   --color175: #9baaa0;
   --color-line: #2f3c35;
+  
 
   /* Grid Pattern Variables */
   --grid-dot-size: 1px;
@@ -62,3 +63,10 @@ body {
   width: 100%;
   /* border: 2px solid var(--color175); */
 } 
+.event‑rail { min-width: 200px; max-width: 25%; display: flex; flex-direction: column; gap: 20px }
+.event‑list { list-style:none; margin:0; padding:10px; overflow-y:auto; height:100%; }
+.ev-info  { color:#768b7d; }  /* soft green */
+.ev-warn  { color:#ffc107; }
+.ev-error { color:#ff5252; }
+.ev-mail  { color:#9baaa0; font-style:italic; }
+.ts { font-size:10px; margin-right:6px; opacity:.6; }
