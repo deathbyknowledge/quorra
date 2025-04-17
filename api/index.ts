@@ -24,16 +24,17 @@ import {
   getActionPrompt,
   getReasoningPrompt,
   MailConf,
-  Model,
   ModelConfig,
   notifyUser,
   toAbsolutePath,
 } from "./utils";
-import {zodFunction} from "openai/helpers/zod.mjs";
+import { zodFunction } from "openai/helpers/zod.mjs";
+import { Event, EventType, publishToBus, summary } from "./bus";
 
 type State = {
   cwd: string;
   conversation: { from: string; content: string }[];
+  flags: { debug: boolean };
 };
 
 export enum Owner {
@@ -42,7 +43,11 @@ export enum Owner {
   Quorra = "quorra",
 }
 
-const INITIAL_STATE: State = { cwd: "/", conversation: [] };
+const INITIAL_STATE: State = {
+  cwd: "/",
+  conversation: [],
+  flags: { debug: true },
+};
 
 const PROCS = new Map<
   string,
@@ -176,15 +181,15 @@ export class Quorra extends Agent<Env, State> {
       let i = 0;
       while (true) {
         const call = async (name: string, args: any) => {
-          if (name ===  'spawnWorker') {
-            const {task} = args;
+          if (name === "spawnWorker") {
+            const { task } = args;
             return await this.spawn(task);
           } else {
             return await callFunction(name, args);
           }
-        }
+        };
         const res = await execWithTools({
-          model: model.name as Model,
+          model: model.name,
           provider,
           messages,
           tools: [...tools, spawnWorkerDef],
@@ -515,6 +520,42 @@ export class Quorra extends Agent<Env, State> {
     await this.destroy();
     return true;
   }
+
+  @callable()
+  async test() {
+    // TODO: revisit
+    publishToBus(EventType.Debug, "Test 1234 Hell yah rocking baby");
+  }
+
+  userStatus() {
+    const conns =  Array.from(this.getConnections());
+    conns.length ? 'ONLINE' : 'OFFLINE';
+  }
+
+  async orchestrate(event: Event) {
+    switch (event.type) {
+      case EventType.Debug: {
+        this.broadcast(event.data);
+        break;
+      }
+      case EventType.FileCreated: {
+        const { path } = event.data;
+        await summary(path, "files");
+        break;
+      }
+      case EventType.FileDeleted:
+      case EventType.NewEmail: {
+        const { path } = event.data;
+        await summary(path, "emails");
+        break;
+      }
+      case EventType.ProcessSpawned:
+      case EventType.ProcessAborted:
+      case EventType.ProcessFinished:
+      default:
+        console.log("boop");
+    }
+  }
 }
 
 export type FSEntry = {
@@ -604,7 +645,7 @@ export default {
           role: "system",
           content: buildPrompt(
             "sam",
-            true,
+            false,
             "/tmp/",
             JSON.stringify(processes),
             "Empty",
@@ -619,7 +660,7 @@ export default {
 
       // Call model + exec tools
       await execWithTools({
-        model: model.name as Model,
+        model: model.name,
         provider,
         messages,
         tools,
@@ -631,6 +672,14 @@ export default {
         e = new Error(e);
       }
       await notifyUser(`[EMAIL ERROR] ${e.name}: ${e.message}`);
+    }
+  },
+  async queue(batch, env) {
+    const quorra = await getAgentByName(env.Quorra, "quorra");
+    for (const msg of batch.messages) {
+      // do work
+      await quorra.orchestrate(msg.body as Event);
+      msg.ack(); // ack after success
     }
   },
 } satisfies ExportedHandler<Env>;

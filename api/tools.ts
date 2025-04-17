@@ -10,6 +10,7 @@ import {
 import { env } from "cloudflare:workers";
 import { fs } from "./fs";
 import { parse } from "toml";
+import {EventType, publishToBus} from "./bus";
 
 /*
     EMAIL TOOLS
@@ -274,6 +275,7 @@ const createHandleEmail = (
           )}`
         : "";
 
+      await publishToBus(EventType.NewEmail, { path });
       await env.FILE_SYSTEM.put(path, `${formattedEmail}${formattedReply}`);
     }
     if (reply) {

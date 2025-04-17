@@ -27,5 +27,19 @@
   "observability": {
     "enabled": true
   },
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "quorra-embeddings"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "queue": "quorra-queue", "binding": "BUS" }
+    ],
+    "consumers": [
+      { "queue": "quorra-queue", "max_batch_size": 10 }
+    ]
+  },
   "send_email": [{"name": "EMAIL" }],
 }

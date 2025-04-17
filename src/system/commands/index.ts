@@ -87,8 +87,8 @@ export const commands: { [key: string]: CommandFn } = {
   wipe: async (_, ctx) => {
     ctx.agent?.setState({ ...ctx.agentState, conversation: [] } as any);
   },
-  // search: async (args, { agent, term }) => {
-  //   if (!agent || !term) return;
-  //   await agent.call("deepsearch", [args.join(" ")]);
-  // },
+  test: async (_, { agent }) => {
+    if (!agent) return;
+    await agent.call("test", []);
+  },
 };

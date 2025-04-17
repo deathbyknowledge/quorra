@@ -1,33 +1,10 @@
 import { Address, Email } from "postal-mime";
-import {
-  HERMES_THINK_PROMPT,
-  HERMES_TOOL_PROMPT,
-  QUORRA_PROMPT,
-} from "./constants";
 import OpenAI from "openai";
 import {
   ChatCompletionMessageParam,
   ChatCompletionTool,
   ChatCompletionToolChoiceOption,
 } from "openai/resources/index.mjs";
-
-export enum Model {
-  DeepHermes24B = "DeepHermes-3-Mistral-24B-Preview",
-  Hermes70B = "Hermes-3-Llama-3.1-70B",
-  GPT4o = "gpt-4o-2024-11-20",
-  GPT4mini = "gpt-4o-mini",
-  GPTo3 = "gpt-o3-mini",
-  DeepSeekV3 = "deepseek-chat",
-  DeepSeekR1 = "deepseek-reasoner",
-  Llama4 = "@cf/meta/llama-4-scout-17b-16e-instruct",
-}
-const cfBaseUrl = `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`;
-
-export enum ProviderURL {
-  OpenAI = "https://api.openai.com/v1",
-  Nous = "https://inference-api.nousresearch.com/v1",
-  DeepSeek = "https://api.deepseek.com/v1",
-}
 
 export type ModelInfo = {
   name: string;
@@ -43,27 +20,10 @@ export type ModelConfig = {
     aliases: Record<string, ModelInfo>;
     default: string;
     email: string;
+    summary: string;
     autonomous_action: string;
     autonomous_reasoning: string;
   };
-};
-
-export const getModelSystemPrompt = (model: Model) => {
-  switch (model) {
-    case Model.DeepHermes24B:
-      return HERMES_THINK_PROMPT;
-    case Model.Hermes70B:
-      return HERMES_TOOL_PROMPT;
-
-    case Model.Llama4:
-    case Model.GPT4o:
-    case Model.DeepSeekV3:
-    case Model.DeepSeekR1:
-      return QUORRA_PROMPT;
-
-    default:
-      throw `What model is this? ${model}`;
-  }
 };
 
 export function getActionPrompt(
@@ -198,30 +158,6 @@ ${toolResults
 
 Generate the JSON output containing \`scratchpad_update\`, \`next_plan\`, and \`is_complete\` based on your analysis of the Tool Execution Result in the context of the GOAL.`;
 }
-
-export const getProviderConfig = (model: Model) => {
-  switch (model) {
-    case Model.DeepHermes24B:
-    case Model.Hermes70B:
-      return { baseURL: ProviderURL.Nous, apiKey: process.env.NOUS_KEY };
-
-    case Model.GPT4o:
-      return { baseURL: ProviderURL.OpenAI, apiKey: process.env.OPENAI_KEY };
-
-    case Model.Llama4:
-      return { baseURL: cfBaseUrl, apiKey: process.env.CF_TOKEN };
-
-    case Model.DeepSeekV3:
-    case Model.DeepSeekR1:
-      return {
-        baseURL: ProviderURL.DeepSeek,
-        apiKey: process.env.DEEPSEEK_KEY,
-      };
-
-    default:
-      throw `What model is this? ${model}`;
-  }
-};
 
 export const formatEmailAsString = (
   from: Address,

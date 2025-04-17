@@ -82,6 +82,9 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
       });
       prompt.current = formatPrompt(state.cwd);
     },
+    onMessage: (msg) => {
+      alert(`[SYSTEM] ${msg.data}`);
+    },
     onClose: () => setEstablished(false),
   });
 

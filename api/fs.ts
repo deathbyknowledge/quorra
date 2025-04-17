@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { FSEntry, Owner } from ".";
+// import { EventType, publishToBus } from './bus';
 
 const openFileDescriptors = new Map<string, WritableStream>();
 
@@ -77,6 +78,7 @@ export const fs = {
     const stream = openFileDescriptors.get(path);
     if (!stream) return;
     await stream.close();
+    // await publishToBus(EventType.FileCreated, {path});
     openFileDescriptors.delete(path);
   },
 };
