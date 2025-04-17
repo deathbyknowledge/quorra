@@ -508,7 +508,6 @@ export class Quorra extends Agent<Env, State> {
   @callable()
   async chdir(path: string) {
     let newCwd = toAbsolutePath(this.state.cwd, path, true);
-    if (!newCwd.endsWith("/")) newCwd += "/";
     const dir = await this.readdir({ path: newCwd });
     if (dir.length > 0) {
       // it exists

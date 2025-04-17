@@ -67,6 +67,10 @@ Ah, I forgot to mention she can notify you on Discord:
 ## Deploy your own
 I'll be improving this to be easy to deploy on your own. But have a look in `.env.example` for the required secrets (some provider keys might not be needed if you're not planning on using them).
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/deathbyknowledge/quorra)
+
+OR
+
 Install deps
 `npm i`
 

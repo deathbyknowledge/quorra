@@ -16,10 +16,11 @@ export const cat: CommandFn = async (argv, { agent, term }) => {
     return;
   }
 
+  let utf8decoder = new TextDecoder();
   await agent.call("pipe", ["readfile", path], {
     onChunk: (chunk: any) => {
       const arr = Uint8Array.from(Object.values(chunk));
-      term.write(stdout(arr));
+      term.write(stdout(utf8decoder.decode(arr)));
     },
     onDone: () => term.writeln(""),
     onError: (e) => {
