@@ -1,6 +1,7 @@
 import commandLineArgs, {
   type OptionDefinition,
 } from "../../libs/command-line-args";
+import {stderr, stdout} from "../constants";
 import { type CommandFn, type FSEntry } from "../types";
 
 export const options: OptionDefinition[] = [
@@ -11,7 +12,7 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
   if (!term || !agent) return;
   const { path } = commandLineArgs(options, { argv });
   if (!path) {
-    term.writeln("Usage: dload [path/to/file]");
+    term.writeln(stdout("Usage: dload [path/to/file]"));
     return;
   }
 
@@ -33,7 +34,7 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
       const percentage = Math.round((progress / size) * 100);
 
       // Clear line and move cursor to start before writing
-      term.write("\x1B[2K\r[" + bar + "] " + percentage + "%");
+      term.write(stdout("\x1B[2K\r[" + bar + "] " + percentage + "%"));
     };
     await agent.call<FSEntry>("open", [path, size]);
     let total = 0;
@@ -42,7 +43,7 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
       const { done, value } = await freader.read();
       if (done) {
         await agent.call<FSEntry>("close", [path]);
-        term.writeln("\nSuccesfully uploaded.");
+        term.writeln(stdout("\nSuccesfully uploaded."));
         term.options.cursorBlink = true;
         break;
       }
@@ -68,7 +69,7 @@ export const uload: CommandFn = async (argv, { agent, term }) => {
       }
     }
   } catch (e) {
-    term.writeln(`uload error: ${e}`);
+    term.writeln(stderr(e));
     term.options.cursorBlink = true;
   }
 };

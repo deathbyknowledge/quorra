@@ -1,6 +1,7 @@
 import commandLineArgs, {
   type OptionDefinition,
 } from "../../libs/command-line-args";
+import {stdout} from "../constants";
 import type { CommandFn, FSEntry } from "../types";
 
 export const options: OptionDefinition[] = [
@@ -9,7 +10,8 @@ export const options: OptionDefinition[] = [
   { name: "all", alias: "a", defaultValue: false, type: Boolean },
 ];
 
-const parseOwner = (owner: string) => (owner === "user" ? "sam" : owner);
+const parseOwner = (owner: string, username: string) =>
+  owner === "user" ? username : owner;
 // Function to format timestamp like ls -l
 function formatTimestamp(date: Date) {
   date = new Date(date);
@@ -37,8 +39,8 @@ const parseName = (entry: FSEntry) => {
 };
 
 export const ls: CommandFn = async (argv, { agent, term, agentState }) => {
-  if (!term || !agent) return;
-  console.log('woof');
+  // this is terrible
+  if (!term || !agent || !agentState) return;
   let { path, all, long } = commandLineArgs(options, { argv });
   if (!path) {
     path = agentState?.cwd ?? "/";
@@ -48,7 +50,9 @@ export const ls: CommandFn = async (argv, { agent, term, agentState }) => {
   const dirEntries = await agent.call<FSEntry[]>("readdir", [{ path }]);
   const colWidths = {
     owner: Math.max(
-      ...dirEntries.map((e) => parseOwner(e.owner ?? "user").length)
+      ...dirEntries.map(
+        (e) => parseOwner(e.owner ?? "user", agentState.username).length
+      )
     ),
     size: Math.max(...dirEntries.map((e) => String(e.size ?? "-").length)),
     ts: Math.max(
@@ -59,24 +63,24 @@ export const ls: CommandFn = async (argv, { agent, term, agentState }) => {
   if (long) {
     dirEntries.forEach((entry: FSEntry) => {
       const name = parseName(entry);
-      const owner = parseOwner(entry.owner ?? "user");
+      const owner = parseOwner(entry.owner ?? "user", agentState?.username);
       if (!all && name.startsWith(".")) return;
       const formattedTime = entry.ts ? formatTimestamp(entry.ts) : "-";
       const line = [
         owner.padEnd(colWidths.owner, " "),
         String(entry.size ?? "-").padStart(colWidths.size, " "),
         formattedTime.padEnd(colWidths.ts, " "),
-        entry.type === "file" ? name : `\x1b[1m${name}\x1b[0m`,
+        entry.type === "file" ? name : `\x1b[1m${name}`,
       ].join("  ");
-      term.writeln(line);
+      term.writeln(stdout(line));
     });
   } else {
     let str = "";
     dirEntries.forEach((entry: FSEntry) => {
       const name = parseName(entry);
       if (!all && name.startsWith(".")) return;
-      str += (entry.type === "file" ? name : `\x1b[1m${name}\x1b[0m`) + "\t";
+      str += (entry.type === "file" ? name : `\x1b[1m${name}`) + "\t";
     });
-    term.writeln(str);
+    term.writeln(stdout(str));
   }
 };

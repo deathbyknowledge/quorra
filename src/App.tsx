@@ -9,11 +9,10 @@ import LoadingBorderWrapper from "./components/LoadingBorderWrapper";
 
 const EventFeed: React.FC = () => {
   const { events } = useAppContext();
-  console.log(events);
   return (
     <div className="column event‑rail">
       <Header left="EVENTS" right="" />
-      <LoadingBorderWrapper borderColor="#9baaa0" borderWidth="2px">
+      <LoadingBorderWrapper borderColor="var(--color-line)" borderWidth="1px">
         <ul className="event‑list">
           {events.map((ev) => (
             <li key={ev.ts} className={`ev-${ev.level}`}>

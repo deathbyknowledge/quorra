@@ -1,6 +1,7 @@
 import commandLineArgs, {
   type OptionDefinition,
 } from "../../libs/command-line-args";
+import { stderr, stdout } from "../constants";
 import type { CommandFn, FSEntry } from "../types";
 
 export const options: OptionDefinition[] = [
@@ -11,12 +12,12 @@ export const dload: CommandFn = async (argv, { agent, term }) => {
   if (!term || !agent) return;
   const { path } = commandLineArgs(options, { argv });
   if (!path) {
-    term.writeln("Usage: dload [path/to/file]");
+    term.writeln(stdout("Usage: dload [path/to/file]"));
     return;
   }
   const entry = await agent.call<FSEntry>("stat", [path]);
   if (!entry) {
-    term.writeln(`cd: no such file or directory: ${path}`);
+    term.writeln(stderr(`no such file or directory: ${path}`));
   }
 
   const slugs = entry.path.split("/");
@@ -42,7 +43,7 @@ export const dload: CommandFn = async (argv, { agent, term }) => {
       const percentage = Math.round((progress / size) * 100);
 
       // Clear line and move cursor to start before writing
-      term.write("\x1B[2K\r[" + bar + "] " + percentage + "%");
+      term.write(stdout("\x1B[2K\r[" + bar + "] " + percentage + "%"));
     };
 
     stepProgress(progress);
@@ -53,15 +54,14 @@ export const dload: CommandFn = async (argv, { agent, term }) => {
         progress += arr.byteLength;
         stepProgress(progress);
       },
-      onDone: () => {
-      },
-      onError: (e) => term.writeln(`Error: ${e}`),
+      onDone: () => {},
+      onError: (e) => term.writeln(stderr(e)),
     });
     await writableStream.close();
-    term.writeln("\nSuccessfully downloaded.");
+    term.writeln(stdout("\nSuccessfully downloaded."));
     term.options.cursorBlink = true;
     term.focus();
   } catch (e) {
-    term.writeln(`dload error: ${e}`);
+    term.writeln(stderr(e));
   }
 };

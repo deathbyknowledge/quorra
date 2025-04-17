@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useAppContext } from "../context/AppContext";
 import { commands, authCommands } from "../system/commands";
 import { useAuthContext } from "../context/AuthContext";
+import {stdout} from "../system/constants";
 
 const XtermComponent: React.FC = () => {
   const terminalRef = useRef<HTMLDivElement | null>(null);
@@ -88,7 +89,7 @@ const XtermComponent: React.FC = () => {
           term.write("\r" + ctx.prompt.current + inputBuffer.current);
         } else if (matches.length > 1) {
           term.writeln("");
-          term.writeln(matches.join("\t"));
+          term.writeln(stdout(matches.join("\t")));
           term.write(ctx.prompt.current + inputBuffer.current);
         }
       } else if (data === "\x1b[A") {

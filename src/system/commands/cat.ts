@@ -1,6 +1,7 @@
 import commandLineArgs, {
   type OptionDefinition,
 } from "../../libs/command-line-args";
+import { stderr, stdout } from "../constants";
 import type { CommandFn } from "../types";
 
 export const options: OptionDefinition[] = [
@@ -11,18 +12,18 @@ export const cat: CommandFn = async (argv, { agent, term }) => {
   if (!term || !agent) return;
   let { path } = commandLineArgs(options, { argv });
   if (!path) {
-    term.writeln("Usage: cat [path/to/folder]");
+    term.writeln(stdout("Usage: cat [path/to/folder]"));
     return;
   }
 
   await agent.call("pipe", ["readfile", path], {
     onChunk: (chunk: any) => {
       const arr = Uint8Array.from(Object.values(chunk));
-      term.write(arr);
+      term.write(stdout(arr));
     },
     onDone: () => term.writeln(""),
     onError: (e) => {
-      term.writeln(`Error: ${e}`);
+      term.writeln(stderr(e));
       return;
     },
   });

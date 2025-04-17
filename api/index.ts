@@ -13,7 +13,11 @@ import {
   readAsConfig,
   readUserPreferences,
 } from "./tools";
-import { MAIL_CONF_PATH, MODEL_CONF_PATH } from "./constants";
+import {
+  DEFAULT_USER_PREFERENCES,
+  MAIL_CONF_PATH,
+  MODEL_CONF_PATH,
+} from "./constants";
 import { z } from "zod";
 import { jsonrepair } from "jsonrepair";
 import { fs } from "./fs";
@@ -29,12 +33,14 @@ import {
   toAbsolutePath,
 } from "./utils";
 import { zodFunction } from "openai/helpers/zod.mjs";
-import { type Event, EventType, publishToBus, summary } from "./bus";
+import { type Event, EventType, publishToBus, summarizeAndIndex } from "./bus";
+import { env } from "cloudflare:workers";
 
 type State = {
   cwd: string;
   conversation: { from: string; content: string }[];
   flags: { debug: boolean };
+  username: string;
 };
 
 export enum Owner {
@@ -47,6 +53,7 @@ const INITIAL_STATE: State = {
   cwd: "/",
   conversation: [],
   flags: { debug: true },
+  username: env.USERNAME,
 };
 
 const PROCS = new Map<
@@ -54,11 +61,32 @@ const PROCS = new Map<
   { promise: Promise<void>; aborted: boolean; cwd: string; task: string }
 >();
 
+type SystemEvent = {
+  ts: number;
+  level: "info" | "warn" | "error" | "mail" | "proc";
+  source: "quorra" | "system" | string;
+  message: string;
+};
+
+const createSystemEvent = (
+  level: "info" | "warn" | "error" | "mail" | "proc",
+  source: string,
+  message: string
+) => ({
+  type: "system-event",
+  data: { ts: Date.now(), level, source, message },
+});
+
 export class Quorra extends Agent<Env, State> {
   async onStart(): Promise<void> {
+    // Assume it's first boot.
     if (!this.state) {
-      // set initial state
       this.setState(INITIAL_STATE);
+      const prefsPath = `/home/${INITIAL_STATE.username}/.quorra`; // user prefs re: quorra
+      const file = await this.stat(prefsPath);
+      if (!file) {
+        await this.env.FILE_SYSTEM.put(prefsPath, DEFAULT_USER_PREFERENCES);
+      }
     }
   }
 
@@ -66,22 +94,18 @@ export class Quorra extends Agent<Env, State> {
     console.error(`[ERROR] Conn ${connection}: ${error}`);
   }
 
-  info(message: string, data?: any) {
-    console.log(`INFO: ${message}`, data || "");
-  }
-
-  error(message: string, data?: any) {
-    let formatted = `[ERROR] ${message}`;
-    if (data) formatted += JSON.stringify(data);
-    console.warn(formatted);
-    notifyUser(formatted);
-  }
-
-  warn(message: string, data?: any) {
-    let formatted = `[WARN] ${message}`;
-    if (data) formatted += JSON.stringify(data);
-    console.error(formatted);
-    notifyUser(formatted);
+  log(
+    level: "info" | "warn" | "error" | "mail",
+    message: string,
+    source = "quorra"
+  ) {
+    const msg = JSON.stringify(
+      createSystemEvent(level, source, message),
+      null,
+      2
+    );
+    this.broadcast(msg);
+    if (!this.isUserOnline()) this.ctx.waitUntil(notifyUser(msg));
   }
 
   @callable()
@@ -97,7 +121,7 @@ export class Quorra extends Agent<Env, State> {
     const modelsConf = await readAsConfig<ModelConfig>(MODEL_CONF_PATH).catch(
       (e) => e.toString()
     );
-    const preferences = await readUserPreferences("sam");
+    const preferences = await readUserPreferences(this.state.username);
     const model = modelsConf?.models?.aliases?.[modelsConf?.models?.default];
     if (!model)
       notifyUser(
@@ -112,15 +136,18 @@ export class Quorra extends Agent<Env, State> {
     }
     this.setState({
       ...this.state,
-      conversation: [...this.state.conversation, { from: "sam", content: ask }],
+      conversation: [
+        ...this.state.conversation,
+        { from: this.state.username, content: ask },
+      ],
     });
     const messages: any = [
       {
         role: "system",
         // content: getModelSystemPrompt(model.name as Model),
         content: buildPrompt(
-          "sam",
-          true,
+          this.state.username,
+          this.isUserOnline(),
           this.state.cwd,
           JSON.stringify(processes),
           "Empty",
@@ -155,7 +182,7 @@ export class Quorra extends Agent<Env, State> {
       name: "spawnWorker",
       parameters: SpawnWorker,
       description:
-        "Spawns an autonomous worker process. Use when a task can be completed quickly or to divide a compelx task into sub-tasks executed by workers. Returns process id.",
+        "Spawns an autonomous worker process. Use when a task would benefit of parallelism or to split a complex task into sub-tasks handled by different workers. Returns process id.",
     });
 
     if (stream) {
@@ -206,6 +233,15 @@ export class Quorra extends Agent<Env, State> {
           return res; // model responded with text
         } else if (Array.isArray(res)) {
           const tool_calls = res.map((result) => result.call);
+          this.log(
+            "info",
+            `${model.name} executed:\n${tool_calls
+              .map(
+                (call) =>
+                  `\t- ${call.function.name}(${call.function.arguments})`
+              )
+              .join("\n")}`
+          );
           messages.push({
             role: "assistant",
             tool_calls,
@@ -240,10 +276,10 @@ export class Quorra extends Agent<Env, State> {
     }
   }
 
-  async autonomousProcess(id: string, goal: string) {
+  async autonomousProcess(id: string, task: string) {
     const CWD = `/proc/${id}/`; // Unique CWD per task
     await Promise.all([
-      this.env.FILE_SYSTEM.put(CWD + "GOAL.md", goal), // should probably have the model expand on this first
+      this.env.FILE_SYSTEM.put(CWD + "GOAL.md", task), // should probably have the model expand on this first
       this.env.FILE_SYSTEM.put(
         CWD + "SCRATCHPAD.md",
         "# Iteration 0\nInitial state. Task goal defined in GOAL.md. Ready to determine the first action."
@@ -282,13 +318,13 @@ export class Quorra extends Agent<Env, State> {
       ]);
     };
 
-    const maxIter = 15;
+    const maxIter = 25;
     let iter = 0;
     while (maxIter > iter) {
       // CHECK IF HAS BEEN ABORTED
       let proc = PROCS.get(id);
       if (!proc || proc.aborted) {
-        await notifyUser(`[TASK ${id}] Received abort signal. Aborting...`);
+        await publishToBus(EventType.ProcessAborted, { id, task });
         await cleanup();
         return;
       }
@@ -300,7 +336,12 @@ export class Quorra extends Agent<Env, State> {
       ]);
       const files = await Promise.all(objects.map((obj) => obj?.text()));
       if (files.includes(undefined)) {
-        this.error("Task required files did not exist. Aborting...");
+        // should never happen
+        this.log(
+          "error",
+          "Task required files did not exist. Aborting...",
+          `proc:${id}`
+        );
         return;
       }
       const [goal, scratchpad, plan] = files as string[];
@@ -327,8 +368,10 @@ export class Quorra extends Agent<Env, State> {
       const toolResults: { name: string; result: string }[] = [];
       if (typeof execResult === "string") {
         // should never happen
-        this.error(
-          `Model was supposed to call a tool. Instead it said ${execResult}`
+        this.log(
+          "error",
+          `Model was supposed to call a tool. Instead it said ${execResult}`,
+          `proc:${id}`
         );
       } else if (Array.isArray(execResult)) {
         execResult.forEach((result) => {
@@ -336,6 +379,14 @@ export class Quorra extends Agent<Env, State> {
           toolCalls.push({ name, args: result.call.function.arguments });
           toolResults.push({ name, result: JSON.stringify(result.result) });
         });
+        this.log(
+          "info",
+          `${actionModel.name} executed:\n${toolCalls
+            .map(
+              (call) => `\t- ${call.name}(${call.args})`
+            )
+            .join("\n")}`
+        );
       }
 
       const ReasonResult = z
@@ -353,7 +404,7 @@ export class Quorra extends Agent<Env, State> {
       // Check if aborted again after first Agent call.
       proc = PROCS.get(id);
       if (!proc || proc.aborted) {
-        await notifyUser(`[TASK ${id}] Received abort signal. Aborting...`);
+        await publishToBus(EventType.ProcessAborted, { id, task });
         await cleanup();
         return;
       }
@@ -398,20 +449,21 @@ export class Quorra extends Agent<Env, State> {
         this.env.FILE_SYSTEM.put(CWD + "PLAN.md", next_plan), // Placeholder
       ]);
     }
-
+    await publishToBus(EventType.ProcessFinished, { id, task });
     await cleanup();
   }
 
   @callable()
-  async spawn(goal: string) {
+  async spawn(task: string) {
     const id = crypto.randomUUID().slice(0, 8);
-    const promise = this.autonomousProcess(id, goal);
+    const promise = this.autonomousProcess(id, task);
     PROCS.set(id, {
       promise,
       cwd: this.state.cwd,
       aborted: false,
-      task: goal,
+      task,
     });
+    await publishToBus(EventType.ProcessSpawned, { id, task });
     return id;
   }
 
@@ -523,45 +575,77 @@ export class Quorra extends Agent<Env, State> {
 
   @callable()
   async test() {
-    // TODO: revisit
     publishToBus(EventType.Debug, "Test 1234 Hell yah rocking baby");
   }
 
-  userStatus() {
+  isUserOnline() {
     const conns = Array.from(this.getConnections());
-    conns.length ? "ONLINE" : "OFFLINE";
+    return !!conns.length;
   }
 
   async orchestrate(event: Event) {
     switch (event.type) {
-      case EventType.Debug: {
-        this.broadcast(
-          JSON.stringify({
-            type: "system-event",
-            data: {
-              ts: Date.now(),
-              level: "info",
-              source: "quorra",
-              message: event.data,
-            },
-          })
+      case EventType.FileCreated: {
+        const { path } = event.data;
+        this.log("info", `${path} created`, `system`);
+        let error = null;
+        await summarizeAndIndex(path, "files").catch((e) => (error = e));
+        if (error)
+          this.log(
+            "error",
+            `error computing summary for ${path}: ${error}`,
+            `system`
+          );
+        else this.log("info", `indexed for ${path} created`, `system`);
+        break;
+      }
+      case EventType.FileDeleted: {
+        //TODO: delete embedds
+        const { path } = event.data;
+        this.log("info", `${path} deleted`, `system`);
+        break;
+      }
+      case EventType.NewEmail: {
+        const { path, userNotification } = event.data;
+        this.log("mail", `${userNotification}. Stored in ${path}.`, `quorra`);
+        let error = null;
+        await summarizeAndIndex(path, "emails").catch((e) => (error = e));
+        if (error)
+          this.log(
+            "error",
+            `error computing summary for ${path}: ${error}`,
+            `system`
+          );
+        else this.log("info", `indexed for ${path} created`, `system`);
+        break;
+      }
+      case EventType.ProcessSpawned: {
+        const { id, task } = event.data;
+        this.log(
+          "info",
+          `Task spawned: <${task.slice(0, 16)}>...`,
+          `proc:${id}`
         );
         break;
       }
-      case EventType.FileCreated: {
-        const { path } = event.data;
-        await summary(path, "files");
+      case EventType.ProcessAborted: {
+        const { id, task } = event.data;
+        this.log(
+          "info",
+          `Received abort signal. Aborting task <${task.slice(0, 16)}...>`,
+          `proc:${id}`
+        );
         break;
       }
-      case EventType.FileDeleted:
-      case EventType.NewEmail: {
-        const { path } = event.data;
-        await summary(path, "emails");
+      case EventType.ProcessFinished: {
+        const { id, task } = event.data;
+        this.log(
+          "info",
+          `Task completed successfully <${task.slice(0, 16)}...>`,
+          `proc:${id}`
+        );
         break;
       }
-      case EventType.ProcessSpawned:
-      case EventType.ProcessAborted:
-      case EventType.ProcessFinished:
       default:
         console.log("boop");
     }
@@ -613,12 +697,14 @@ export default {
   // I deployed the handler and that made it available in the CF Dashboard under Account > Zone > Email Routing.
   async email(message: ForwardableEmailMessage) {
     try {
+      const quorra = await getAgentByName(env.Quorra, "quorra");
+      const username = (await quorra.state).username;
       const email = await PostalMime.parse(message.raw);
       let conf = await readAsConfig<Partial<MailConf>>(MAIL_CONF_PATH);
       if (!conf)
-        await notifyUser(
-          `Processing email without a configuration file. Replies will only be logged, not delivered. Add it in ${MAIL_CONF_PATH}.`,
-          false
+        await quorra.log(
+          "warn",
+          `Processing email without a configuration file. Replies will only be logged, not delivered. Add it in ${MAIL_CONF_PATH}.`
         );
       const task = formatMailTask(conf, email);
 
@@ -639,7 +725,7 @@ export default {
       const modelsConf = await readAsConfig<Partial<ModelConfig>>(
         MODEL_CONF_PATH
       ).catch((e) => e.toString());
-      const preferences = await readUserPreferences("sam");
+      const preferences = await readUserPreferences(username);
       const model = modelsConf?.models?.aliases?.[modelsConf?.models?.email];
       if (!model)
         notifyUser(
@@ -654,8 +740,8 @@ export default {
         {
           role: "system",
           content: buildPrompt(
-            "sam",
-            false,
+            username,
+            await quorra.isUserOnline(),
             "/tmp/",
             JSON.stringify(processes),
             "Empty",

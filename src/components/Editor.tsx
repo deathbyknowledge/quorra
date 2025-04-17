@@ -32,8 +32,7 @@ export const Editor: React.FC = () => {
           onChunk: (chunk: any) => {
             str += utf8decoder.decode(Uint8Array.from(Object.values(chunk)));
           },
-          onDone: () => loadFileContent(str),
-          //   onError: (e) => term.writeln(`Error: ${e}`),
+          onDone: () => loadFileContent(str.startsWith("Error") ? "" : str),
         });
       }
       if (!filePath) setLoading(true);

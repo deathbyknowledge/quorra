@@ -3,11 +3,15 @@
   "name": "quorra",
   "main": "api/index.ts",
   "compatibility_date": "2025-04-01",
-  "compatibility_flags": [ "nodejs_compat", "nodejs_compat_populate_process_env" ],
+  "compatibility_flags": [
+    "nodejs_compat",
+    "nodejs_compat_populate_process_env"
+  ],
   "assets": {
     "not_found_handling": "404-page",
     "binding": "ASSETS"
   },
+  "vars": { "USERNAME": "caise", "HOSTNAME": "quorra.deathbyknowledge.com" },
   "ai": { "binding": "AI" },
   "migrations": [
     {
@@ -23,7 +27,7 @@
       }
     ]
   },
-  "r2_buckets": [{"binding": "FILE_SYSTEM", "bucket_name": "quorra"}],
+  "r2_buckets": [{ "binding": "FILE_SYSTEM", "bucket_name": "quorra" }],
   "observability": {
     "enabled": true
   },
@@ -34,12 +38,8 @@
     }
   ],
   "queues": {
-    "producers": [
-      { "queue": "quorra-queue", "binding": "BUS" }
-    ],
-    "consumers": [
-      { "queue": "quorra-queue", "max_batch_size": 10 }
-    ]
+    "producers": [{ "queue": "quorra-queue", "binding": "BUS" }],
+    "consumers": [{ "queue": "quorra-queue", "max_batch_size": 10 }]
   },
-  "send_email": [{"name": "EMAIL" }],
+  "send_email": [{ "name": "EMAIL" }]
 }

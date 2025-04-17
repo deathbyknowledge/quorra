@@ -8,6 +8,7 @@ import { ls } from "./ls";
 import { ask } from "./ask";
 import { rm } from "./rm";
 import { cat } from "./cat";
+import {stderr, stdout} from "../constants";
 
 export const authCommands: {
   [key: string]: (
@@ -18,7 +19,7 @@ export const authCommands: {
 } = {
   login: (args, term, setKey) => {
     if (args.length !== 1) {
-      term.writeln("Usage: login [password]");
+      term.writeln(stdout("Usage: login [password]"));
       return;
     }
     setKey(args[0]);
@@ -30,9 +31,9 @@ export const commands: { [key: string]: CommandFn } = {
     if (!term) return;
     term.write("", () => term.clear());
   },
-  whoami: (_, { term }) => {
-    if (!term) return;
-    term.writeln("sam");
+  whoami: (_, { term, agentState }) => {
+    if (!term || !agentState) return;
+    term.writeln(stdout(agentState.username));
   },
   ls,
   cat,
@@ -45,10 +46,12 @@ export const commands: { [key: string]: CommandFn } = {
     location.reload();
   },
   spawn: async (args, { agent, term }) => {
-    // const taskId = await agent?.call("scheduleTest", []);
-    // term?.writeln(`Spawned ${taskId}.`);
     if (!agent || !term) return;
     await agent.call("spawn", [args.join(" ")]);
+  },
+  echo: async (args, { term }) => {
+    if (!term) return;
+    term.writeln(stderr(args.join(" ")));
   },
   ps: async (_, { agent, term }) => {
     const tasks = await agent?.call("ps", []);
@@ -57,7 +60,7 @@ export const commands: { [key: string]: CommandFn } = {
   kill: async (args, { agent, term }) => {
     if (!term || !agent) return;
     if (args.length != 1) {
-      term.writeln("Usage: kill [procId]");
+      term.writeln(stdout("Usage: kill [procId]"));
       return;
     }
     await agent.call("kill", [args[0]]);

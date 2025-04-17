@@ -2,50 +2,55 @@ import { zodFunction } from "openai/helpers/zod";
 import { z } from "zod";
 import { createMimeMessage } from "mimetext";
 import { type Email } from "postal-mime";
-import {
-  formatEmailAsString,
-  notifyUser,
-  toAbsolutePath,
-} from "./utils";
-import { env } from "cloudflare:workers";
-import { fs } from "./fs";
 import { parse } from "toml";
-import {EventType, publishToBus} from "./bus";
+import { env } from "cloudflare:workers";
 
-/*
-    EMAIL TOOLS
-*/
-enum EmailTools {
+import { fs } from "./fs";
+import { formatEmailAsString, toAbsolutePath } from "./utils";
+import { EventType, publishToBus } from "./bus";
+
+// Enums for tool names and modes
+export enum EmailTools {
   HandleEmail = "handleEmail",
   RejectEmail = "rejectEmail",
 }
 
-enum SysTools {
+export enum SysTools {
   ReadDir = "readDirectory",
   ReadFile = "readFile",
   WriteFile = "writeFile",
+  QuerySystem = "querySystem",
 }
 
-enum SearchTools {
+export enum SearchTools {
   WebSearch = "webSearch",
   ReadWebsites = "readWebsites",
 }
+
+export enum Mode {
+  Email = "email",
+  AllSyscalls = "allSyscalls",
+}
+
+// Configuration readers
 export async function readAsConfig<T>(path: string): Promise<T> {
   const obj = await env.FILE_SYSTEM.get(path);
-  if (!obj || !obj.body) {
+  if (!obj?.body) {
     throw new Error("Quorra configuration file not found.");
   }
   const content = await obj.text();
   return parse(content) as T;
 }
-export async function readUserPreferences(username:string): Promise<string> {
+
+export async function readUserPreferences(username: string): Promise<string> {
   const obj = await env.FILE_SYSTEM.get(`/home/${username}/.quorra`);
-  if (!obj || !obj.body) {
+  if (!obj?.body) {
     throw new Error("Quorra configuration file not found.");
   }
-  return await obj.text();
+  return obj.text();
 }
 
+// Zod schemas and definitions for system calls
 const WriteFileParameters = z
   .object({
     path: z
@@ -81,20 +86,43 @@ const readFileDef = zodFunction({
     "Reads the contents of the file at the given path. Returns null if the file doesn't exist.",
 });
 
-const ReadWebsitesParameters = z
+const ReadDirParameters = z
   .object({
-    url: z.string().describe("The URL of the web page to be read."),
+    path: z.string().describe("The path of the directory to list."),
   })
-  .required({ url: true });
+  .required({ path: true });
 
-export type ReadWebsiteParams = z.infer<typeof ReadWebsitesParameters>;
+export type ReadDirParams = z.infer<typeof ReadDirParameters>;
 
-const readWebsitesDef = zodFunction({
-  name: SearchTools.ReadWebsites,
-  parameters: ReadWebsitesParameters,
-  description: "Returns the content of a website.",
+const readDirDef = zodFunction({
+  name: SysTools.ReadDir,
+  parameters: ReadDirParameters,
+  description: "Lists the file system entries of the directory specified.",
 });
 
+const QuerySystemParameters = z
+  .object({
+    query: z
+      .string()
+      .describe(
+        "The path of the directory to list. The queries can be in natural language as the search is powered by RAG."
+      ),
+    scope: z
+      .enum(["files", "emails", "conversations", "all"])
+      .describe("Type of data to query on the system. Defaults to 'all'."),
+  })
+  .required({ query: true });
+
+export type QuerySystemParams = z.infer<typeof QuerySystemParameters>;
+
+const querySystemDef = zodFunction({
+  name: SysTools.QuerySystem,
+  parameters: QuerySystemParameters,
+  description:
+    "Queries the system data. Can narrow the scope of the search for better accuracy. Returns top 3 results with the path of the source and the score of each match.",
+});
+
+// Zod schemas and definitions for web search
 const WebSearchParameters = z
   .object({
     query: z.string().describe("A query to look up on the search engine."),
@@ -110,108 +138,23 @@ const webSearchDef = zodFunction({
     "Looks up a query on a search engine. Shows ranked results with metadata, links, summaries, etc.",
 });
 
-const ReadDirParameters = z
+const ReadWebsitesParameters = z
   .object({
-    path: z.string().describe("The path of the directory to list."),
+    url: z.string().describe("The URL of the web page to be read."),
   })
-  .required({ path: true });
+  .required({ url: true });
 
-export type ReadDirParams = z.infer<typeof ReadDirParameters>;
+export type ReadWebsiteParams = z.infer<typeof ReadWebsitesParameters>;
 
-const readDirDef = zodFunction({
-  name: SysTools.ReadDir,
-  parameters: ReadDirParameters,
-  description: "Lists the file system entries of the directory specified.",
+const readWebsitesDef = zodFunction({
+  name: SearchTools.ReadWebsites,
+  parameters: ReadWebsitesParameters,
+  description: "Returns the content of a website.",
 });
 
-const createWriteFile = (cwd?: string) => {
-  return async ({ path, content }: WriteFileParams) => {
-    path = toAbsolutePath(cwd ?? "/tmp/", path);
-    return !!(await env.FILE_SYSTEM.put(path, content));
-  };
-};
-
-const createReadFile = (cwd?: string) => {
-  return async ({ path }: ReadFileParams) => {
-    path = toAbsolutePath(cwd ?? "/tmp/", path);
-    const obj = await env.FILE_SYSTEM.get(path);
-    if (obj && obj.body) return await obj.text();
-    return null;
-  };
-};
-
-const createReadWebsites = () => {
-  return async ({ url }: ReadWebsiteParams) => {
-    const maxRetries = 3;
-    let i = 0;
-    while (true) {
-      try {
-        const res = await fetch(url);
-        const blob = await res.blob();
-        const file = { name: url + ".html", blob };
-        const parsed = await env.AI.toMarkdown(file);
-        const result = `[START OF CONTENT FOR ${parsed.name.slice(0, -5)}]\n${
-          parsed.data
-        }\n[END OF CONTENT]\n`;
-        return result;
-      } catch {
-        i++;
-        if (maxRetries < i) return "Error: can't read the website.";
-        continue;
-      }
-    }
-  };
-};
-
-const createWebSearch = () => {
-  return async ({ query }: WebSearchParams) => {
-    const myHeaders = new Headers();
-    myHeaders.append("X-API-KEY", process.env.SEARCH_KEY);
-    myHeaders.append("Content-Type", "application/json");
-
-    const raw = JSON.stringify({
-      q: query,
-    });
-
-    const requestOptions = {
-      method: "POST",
-      headers: myHeaders,
-      body: raw,
-      redirect: "follow",
-    };
-
-    try {
-      const response = await fetch(
-        "https://google.serper.dev/search",
-        requestOptions as any
-      );
-      const { searchParameters, knowledgeGraph, organic, topStories }: any =
-        await response.json();
-      const res = {
-        searchParameters,
-        knowledgeGraph,
-        organic: organic?.slice(0, 3),
-        topStories: topStories?.slice(0, 3),
-      };
-      return JSON.stringify(res, null, 2);
-    } catch (error: any) {
-      console.error(error.toString());
-      return error.toString();
-    }
-  };
-};
-
-const createReadDir = (cwd?: string) => {
-  return async ({ path }: ReadDirParams) => {
-    path = toAbsolutePath(cwd ?? "/tmp/", path, true);
-    return await fs.readdir({ path });
-  };
-};
-
-// Handle Email. Decides wether to store an incoming email and if to possibly reply to it.
+// Zod schemas and definitions for email tools
 const HandleEmailParameters = z
   .object({
-    shouldStore: z.boolean().describe("Whether this email needs to be stored."),
     userNotification: z
       .string()
       .describe(
@@ -224,7 +167,7 @@ const HandleEmailParameters = z
         "Optional field for the reply. When unset, no reply will be sent."
       ),
   })
-  .required({ shouldStore: true });
+  .required({ userNotification: true });
 
 type HandleEmailParams = z.infer<typeof HandleEmailParameters>;
 
@@ -234,73 +177,6 @@ const handleEmailDef = zodFunction({
   description: "Handles the email when it is NOT to be rejected.",
 });
 
-const createHandleEmail = (
-  email: Email,
-  quorraAddr: string,
-  sendReply: (from: string, to: string, content: string) => Promise<void>
-) => {
-  const replySubject = email.subject?.startsWith("Re: ")
-    ? email.subject
-    : `Re: ${email.subject}`; // turns out this is pretty necessary if you want mail clients to thread properly
-
-  const formattedEmail = formatEmailAsString(
-    email.from,
-    email.subject ?? "",
-    email.text ?? email.html ?? ""
-  );
-
-  return async ({
-    shouldStore,
-    reply,
-    userNotification,
-  }: HandleEmailParams) => {
-    // TODO: remove `true` whenever we're ready for prod
-    if (shouldStore || true) {
-      const now = new Date();
-      var formattedDate; // MMMM`
-      formattedDate =
-        now.getFullYear() +
-        "-" +
-        ("0" + (now.getMonth() + 1)).slice(-2) +
-        "-" +
-        ("0" + now.getDate()).slice(-2);
-
-      const id = crypto.randomUUID().slice(0, 8);
-      const path = `/var/mail/${formattedDate}/${id}.txt`;
-      const formattedReply = reply
-        ? `\n\n${formatEmailAsString(
-            { address: quorraAddr, name: "Quorra" },
-            replySubject,
-            reply
-          )}`
-        : "";
-
-      await publishToBus(EventType.NewEmail, { path });
-      await env.FILE_SYSTEM.put(path, `${formattedEmail}${formattedReply}`);
-    }
-    if (reply) {
-      const msg = createMimeMessage();
-      msg.setHeader("In-Reply-To", email.messageId);
-      msg.setHeader("References", email.messageId); // also necessary for proper threading
-      msg.setSender({
-        name: "Quorra",
-        addr: quorraAddr,
-      });
-      msg.setRecipient(email.from.address!);
-      msg.setSubject(replySubject);
-      msg.addMessage({
-        contentType: "text/plain",
-        data: reply,
-      });
-
-      await sendReply(quorraAddr, email.from.address!, msg.asRaw());
-    }
-    await notifyUser(userNotification);
-  };
-};
-
-// Reject Email. Have you ever sent an email to an address that doesn't exist?
-// This triggers a similar error with a custom reason for the failed delivery.
 const RejectEmailParameters = z
   .object({
     reason: z
@@ -320,20 +196,149 @@ const rejectEmailDef = zodFunction({
     "Rejects the email with the given reason. The user will not receive it.",
 });
 
+// Factory functions for tool implementations
+const createWriteFile =
+  (cwd?: string) =>
+  async ({ path, content }: WriteFileParams) => {
+    path = toAbsolutePath(cwd ?? "/tmp/", path);
+    return !!(await env.FILE_SYSTEM.put(path, content));
+  };
+
+const createReadFile =
+  (cwd?: string) =>
+  async ({ path }: ReadFileParams) => {
+    path = toAbsolutePath(cwd ?? "/tmp/", path);
+    const obj = await env.FILE_SYSTEM.get(path);
+    return obj?.body ? obj.text() : null;
+  };
+
+const createReadDir =
+  (cwd?: string) =>
+  async ({ path }: ReadDirParams) => {
+    path = toAbsolutePath(cwd ?? "/tmp/", path, true);
+    return fs.readdir({ path });
+  };
+
+const createQuerySystem =
+  () =>
+  async ({ query, scope = "all" }: QuerySystemParams) => {
+    const res = await env.AI.run("@cf/baai/bge-large-en-v1.5", {
+      text: query,
+    });
+    const namespace = scope === "all" ? undefined : scope;
+    const results = await env.VECTORIZE.query(res.data[0], {
+      namespace,
+      topK: 3,
+      returnMetadata: "none",
+      returnValues: false,
+    });
+
+    return results.matches.map((match) => ({
+      path: match.id,
+      score: match.score,
+    }));
+  };
+
+const createWebSearch =
+  () =>
+  async ({ query }: WebSearchParams) => {
+    const headers = new Headers({
+      "X-API-KEY": process.env.SEARCH_KEY || "",
+      "Content-Type": "application/json",
+    });
+    const response = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ q: query }),
+      redirect: "follow",
+    });
+    const data: any = await response.json();
+    const { searchParameters, knowledgeGraph, organic, topStories } = data;
+    return JSON.stringify(
+      {
+        searchParameters,
+        knowledgeGraph,
+        organic: organic?.slice(0, 3),
+        topStories: topStories?.slice(0, 3),
+      },
+      null,
+      2
+    );
+  };
+
+const createReadWebsites =
+  () =>
+  async ({ url }: ReadWebsiteParams) => {
+    const maxRetries = 3;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const file = { name: `${url}.html`, blob };
+        const parsed = await env.AI.toMarkdown(file);
+        return `[START OF CONTENT FOR ${parsed.name.slice(0, -5)}]\n${
+          parsed.data
+        }\n[END OF CONTENT]\n`;
+      } catch {
+        if (i === maxRetries - 1) return "Error: can't read the website.";
+      }
+    }
+    return "Error: can't read the website.";
+  };
+
+const createHandleEmail = (
+  email: Email,
+  quorraAddr: string,
+  sendReply: (from: string, to: string, content: string) => Promise<void>
+) => {
+  const replySubject = email.subject?.startsWith("Re: ")
+    ? email.subject
+    : `Re: ${email.subject}`;
+  const formattedEmail = formatEmailAsString(
+    email.from,
+    email.subject ?? "",
+    email.text ?? email.html ?? ""
+  );
+
+  return async ({ reply, userNotification }: HandleEmailParams) => {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const id = crypto.randomUUID().slice(0, 8);
+    const path = `/var/mail/${yyyy}-${mm}-${dd}/${id}.txt`;
+
+    const formattedReply = reply
+      ? `\n\n${formatEmailAsString(
+          { name: "Quorra", address: quorraAddr },
+          replySubject,
+          reply
+        )}`
+      : "";
+
+    await env.FILE_SYSTEM.put(path, `${formattedEmail}${formattedReply}`);
+    await publishToBus(EventType.NewEmail, { path, userNotification });
+
+    if (reply) {
+      const msg = createMimeMessage();
+      msg.setHeader("In-Reply-To", email.messageId);
+      msg.setHeader("References", email.messageId);
+      msg.setSender({ name: "Quorra", addr: quorraAddr });
+      msg.setRecipient(email.from.address!);
+      msg.setSubject(replySubject);
+      msg.addMessage({ contentType: "text/plain", data: reply });
+      await sendReply(quorraAddr, email.from.address!, msg.asRaw());
+    }
+  };
+};
+
 const createRejectEmail =
-  (reject: (str: string) => void) =>
+  (reject: (reason: string) => void) =>
   ({ reason }: RejectEmailParams) => {
     reject(reason);
   };
 
-/*
-   ✨ PUTTING IT ALL TOGETHER ✨
-*/
-export enum Mode {
-  Email = "email",
-  AllSyscalls = "allSyscalls",
-}
-
+// Tool definition exports
 export const getToolDefsByMode = (mode: Mode) => {
   switch (mode) {
     case Mode.Email:
@@ -343,62 +348,52 @@ export const getToolDefsByMode = (mode: Mode) => {
         readDirDef,
         writeFileDef,
         readFileDef,
+        querySystemDef,
         webSearchDef,
         readWebsitesDef,
       ];
     default:
-      throw "Trying to get tools for an unsupported mode.";
+      throw new Error("Unsupported mode: " + mode);
   }
 };
 
-// I think I'm just making my life harder by not using a library for this but w/e
 export const generateCallFunction = (mode: Mode, args: unknown) => {
   switch (mode) {
     case Mode.Email: {
-      const { email, reject, sendReply, quorraAddr } = args as {
-        email: Email;
-        quorraAddr: string;
-        reject: (reason: string) => void;
-        sendReply: (from: string, to: string, content: string) => Promise<void>;
-      };
+      const { email, quorraAddr, reject, sendReply } = args as any;
       const handleEmail = createHandleEmail(email, quorraAddr, sendReply);
       const rejectEmail = createRejectEmail(reject);
-      return async (name: string, args: any) => {
-        if (name === EmailTools.HandleEmail) {
-          return await handleEmail(args);
-        }
-        if (name === EmailTools.RejectEmail) {
-          return rejectEmail(args);
-        }
+      return async (name: string, params: any) => {
+        if (name === EmailTools.HandleEmail) return handleEmail(params);
+        if (name === EmailTools.RejectEmail) return rejectEmail(params);
       };
     }
     case Mode.AllSyscalls: {
-      let cwd;
-      if (args) cwd = (args as any).cwd;
+      const cwd = (args as any)?.cwd;
       const readDir = createReadDir(cwd);
       const readFile = createReadFile(cwd);
       const writeFile = createWriteFile(cwd);
+      const querySystem = createQuerySystem();
       const webSearch = createWebSearch();
       const readWebsites = createReadWebsites();
-      return async (name: string, args: any) => {
-        if (name === SysTools.ReadDir) {
-          return await readDir(args);
-        }
-        if (name === SysTools.WriteFile) {
-          return await writeFile(args);
-        }
-        if (name === SearchTools.WebSearch) {
-          return await webSearch(args);
-        }
-        if (name === SearchTools.ReadWebsites) {
-          return await readWebsites(args);
-        }
-        if (name === SysTools.ReadFile) {
-          return await readFile(args);
+      return async (name: string, params: any) => {
+        switch (name) {
+          case SysTools.ReadDir:
+            return readDir(params);
+          case SysTools.WriteFile:
+            return writeFile(params);
+          case SysTools.ReadFile:
+            return readFile(params);
+          case SysTools.QuerySystem:
+            return querySystem(params);
+          case SearchTools.WebSearch:
+            return webSearch(params);
+          case SearchTools.ReadWebsites:
+            return readWebsites(params);
         }
       };
     }
     default:
-      throw "Trying to generate callFunction for an unsupported mode.";
+      throw new Error("Unsupported mode: " + mode);
   }
 };

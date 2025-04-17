@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { type FSEntry, Owner } from ".";
-// import { EventType, publishToBus } from './bus';
+import { EventType, publishToBus } from "./bus";
 
 const openFileDescriptors = new Map<string, WritableStream>();
 
@@ -37,6 +37,11 @@ export const fs = {
   },
   unlink: async (paths: string[]) => {
     await env.FILE_SYSTEM.delete(paths);
+    await Promise.all(
+      paths.map(
+        async (path) => await publishToBus(EventType.FileDeleted, { path })
+      )
+    );
   },
   stat: async (path: string) => {
     const obj = await env.FILE_SYSTEM.head(path);
@@ -78,7 +83,7 @@ export const fs = {
     const stream = openFileDescriptors.get(path);
     if (!stream) return;
     await stream.close();
-    // await publishToBus(EventType.FileCreated, {path});
+    await publishToBus(EventType.FileCreated, { path });
     openFileDescriptors.delete(path);
   },
 };

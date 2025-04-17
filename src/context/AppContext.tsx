@@ -37,6 +37,9 @@ const AppContext = createContext<AppContext>({
 
 export type AgentState = {
   cwd: string;
+  conversations: { from: string; content: string }[];
+  flags: { debug: boolean };
+  username: string;
 };
 
 export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
@@ -49,14 +52,42 @@ export const ContextProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const prompt = useRef("$ ");
   const term = useMemo(() => {
     // First msg just empty prompt
+    const dexTheme = {
+      // base
+      background: "#0D100E", // COLOR_15  - same as UI bg
+      foreground: "#9BAAA0", // COLOR_175 - normal text
+      cursor: "#768B7D", // COLOR_135 - subtle but visible
+      selectionBackground: "rgba(82,104,92,.35)", // COLOR_95 w/ alpha
+
+      // ANSI 0‑7 (dark) ----------------------------------------------------------------
+      black: "#0D100E", // black   – matches bg so “black” text vanishes
+      red: "#3A4A41", // red     – reused dark olive as we have no red
+      green: "#2F3C35", // green   – COLOR_55
+      yellow: "#52685C", // yellow  – COLOR_95
+      blue: "#768B7D", // blue    – COLOR_135
+      magenta: "#74A18D", // magenta – BrightC
+      cyan: "#9BAAA0", // cyan    – COLOR_175
+      white: "#CED4CF", // light   – computed: brighten COLOR_175
+
+      // ANSI 8‑15 (bright) --------------------------------------------------------------
+      brightBlack: "#202924", // COLOR_35  (subdued comments)
+      brightRed: "#3A4A41", // same reuse
+      brightGreen: "#3F594F", // mix COLOR_55 + COLOR_95
+      brightYellow: "#768B7D", // COLOR_135
+      brightBlue: "#9BAAA0", // COLOR_175
+      brightMagenta: "#8BC3AB", // BrightC lightened
+      brightCyan: "#D3E1DB", // very light mint
+      brightWhite: "#FFFFFF",
+    };
     const _term = new Terminal({
       cursorBlink: true,
       convertEol: true,
-      theme: {
-        background: "rgba(0, 0, 0, 0)", // Transparent background
-        foreground: "#9baaa0",
-        cursor: "#9baaa0",
-      },
+      theme: dexTheme,
+      // theme: {
+      //   background: "rgba(0, 0, 0, 0)", // Transparent background
+      //   foreground: "#9baaa0",
+      //   cursor: "#9baaa0",
+      // },
     });
     _term.writeln("Booting up...");
 

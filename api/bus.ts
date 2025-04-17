@@ -26,7 +26,7 @@ export async function publishToBus(type: EventType, data: any) {
   await env.BUS.send({ type, data });
 }
 
-export async function summary(
+export async function summarizeAndIndex(
   path: string,
   type: "emails" | "files" | "conversations"
 ) {
@@ -62,7 +62,7 @@ export async function summary(
   const res = await env.AI.run("@cf/baai/bge-large-en-v1.5", {
     text: summary!,
   });
-  await env.VECTORIZE.insert([
+  await env.VECTORIZE.upsert([
     { id: path, values: res.data[0], namespace: type },
   ]);
 }
